@@ -19,6 +19,8 @@ export interface BlsEntry {
   prep: Prep
   /** normalisierter Suchtext */
   norm: string
+  /** Suchtext ohne Leerzeichen (findet Zusammenschreibungen wie „Haferflocken“ für „Hafer Flocken“) */
+  joined: string
 }
 export interface BlsIndex { meta: BlsMeta; entries: BlsEntry[]; byCode: Map<string, BlsEntry> }
 export interface RawBls { meta: BlsMeta; fields: string[]; rows: (string | number | null)[][] }
@@ -48,7 +50,7 @@ export function buildIndex(raw: RawBls): BlsIndex {
     return {
       code, de, en: String(r[idx.en] ?? ''), group: String(r[idx.group]),
       kcal: num('kcal'), protein: num('protein'), fat: num('fat'), carbs: num('carbs'), fiber: num('fiber'),
-      micros, flags, prep: prepFromName(de, code), norm: normalize(`${de} ${r[idx.en] ?? ''}`),
+      micros, flags, prep: prepFromName(de, code), norm: normalize(`${de} ${r[idx.en] ?? ''}`), joined: normalize(de).replace(/ /g, ''),
     }
   })
   void f
@@ -85,10 +87,13 @@ export function searchBls(index: BlsIndex, q: BlsQuery): BlsHit[] {
         if (words.some(w => w === t)) score += 30
         else if (words.some(w => w.startsWith(t))) score += 20
         else if (e.norm.includes(t)) score += 6
+        else if (t.length >= 5 && e.joined.includes(t)) score += 4
         else { ok = false; break }
       }
       if (!ok) continue
       if (e.norm === full || e.norm.startsWith(full + ' ')) score += 40
+      // Der gesamte Name entspricht der Anfrage (ohne Leerzeichen, z. B. „Haferflocken“ = „Hafer Flocken“): stärkstes Signal
+      if (e.joined === tokens.join('')) score += 75
       if (e.norm.startsWith(full)) score += 15
       score -= Math.min(20, e.norm.length / 8)
       if (e.prep === 'roh') score += 4

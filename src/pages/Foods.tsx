@@ -50,7 +50,7 @@ export function FoodsPage() {
       </div>
       {tab === 'bls' ? <BlsBrowser /> : <>
       <input className={cx(inputCls, 'mb-3')} placeholder="Lebensmittel suchen…" value={q} onChange={e => setQ(e.target.value)} aria-label="Lebensmittel suchen" />
-      <div className="flex gap-2 overflow-x-auto pb-2">
+      <div className="flex gap-2 overflow-x-auto pb-2 items-start">
         <Chip active={cat === 'alle'} onClick={() => setCat('alle')}>Alle</Chip>
         {CATEGORIES.map(c => <Chip key={c} active={cat === c} onClick={() => setCat(c)}>{CAT_EMOJI[c]} {CATEGORY_LABEL[c]}</Chip>)}
       </div>

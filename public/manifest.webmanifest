@@ -1,1 +1,25 @@
-{"name":"Ernährungsplan","short_name":"Ernährung","lang":"de","start_url":"/","display":"standalone","background_color":"#f8f4ea","theme_color":"#2f5d2a","icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}
+{
+  "id": "/",
+  "name": "Ernährungsplan",
+  "short_name": "Ernährung",
+  "description": "Persönlicher Ernährungsplaner – lokal, privat, mit optionalem KI-Berater.",
+  "lang": "de",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f8f4ea",
+  "theme_color": "#2f5d2a",
+  "categories": ["health", "food", "lifestyle"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Ernährungsplan", "url": "/#/plan", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Einkaufsliste", "url": "/#/einkauf", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

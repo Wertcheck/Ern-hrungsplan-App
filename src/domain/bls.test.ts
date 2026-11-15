@@ -109,6 +109,12 @@ describe('BLS: Suche und Filter', () => {
     expect(codes({ text: 'suesskartoffel' }).length).toBeGreaterThan(0)
     expect(normalize('Käse-Soße ß')).toBe('kase sosse ss')
   })
+  it('findet Zusammenschreibungen („Haferflocken“ ↔ „Hafer Flocken“), aber keine Zufallstreffer', () => {
+    expect(codes({ text: 'Haferflocken' })).toContain('C133000')
+    expect(codes({ text: 'haferflocken' })[0]).toBe('C133000')
+    expect(codes({ text: 'sonnenblumenkern' })).toContain('H430100')
+    expect(codes({ text: 'xyzabcdef' })).toEqual([])
+  })
   it('Filter: Gruppe, Zustand, nur Grundlebensmittel, Limit', () => {
     const oils = searchBls(index, { groups: ['Q'], limit: 500 })
     expect(oils.length).toBeGreaterThan(20); expect(oils.every(h => h.entry.group === 'Q')).toBe(true)

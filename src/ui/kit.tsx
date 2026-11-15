@@ -27,7 +27,7 @@ export function Chip({ active, onClick, children, tone = 'default', title }: { a
     : 'bg-paper border-sand text-ink/80 hover:border-olive'
   const Tag = onClick ? 'button' : 'span'
   return <Tag type={onClick ? 'button' : undefined} title={title} onClick={onClick} aria-pressed={onClick ? !!active : undefined}
-    className={cx('inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm transition min-h-9', t)}>{children}</Tag>
+    className={cx('inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm transition min-h-9 whitespace-nowrap', t)}>{children}</Tag>
 }
 
 export function Field({ label, hint, children, error }: { label: string; hint?: string; children: ReactNode; error?: string }) {
