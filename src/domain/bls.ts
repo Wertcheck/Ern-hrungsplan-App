@@ -93,7 +93,7 @@ export function searchBls(index: BlsIndex, q: BlsQuery): BlsHit[] {
       if (!ok) continue
       if (e.norm === full || e.norm.startsWith(full + ' ')) score += 40
       // Der gesamte Name entspricht der Anfrage (ohne Leerzeichen, z. B. „Haferflocken“ = „Hafer Flocken“): stärkstes Signal
-      if (e.joined === tokens.join('')) score += 75
+      if (e.joined === tokens.join('')) score += 150
       if (e.norm.startsWith(full)) score += 15
       score -= Math.min(20, e.norm.length / 8)
       if (e.prep === 'roh') score += 4
