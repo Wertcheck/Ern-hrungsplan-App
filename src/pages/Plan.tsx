@@ -4,8 +4,10 @@ import { Btn, Card, Chip, Notice, PageTitle, Sheet, fmt, todayISO, WEEKDAYS, WEE
 import { PERIODS, alternativesFor, dayTotals, generatePlan } from '../domain/planner'
 import { macroShares, mealMacros } from '../domain/nutrition'
 import { addMeal, removeMeal, setFactor, swapMeal } from '../domain/planops'
-import { SLOT_LABEL, type MealSlot, type PlanDay, type PlannedMeal } from '../domain/types'
+import { SLOT_LABEL, STYLE_LABEL, type MealSlot, type PlanDay, type PlannedMeal } from '../domain/types'
 import { RecipeDetail, RecipeThumb } from './RecipeDetail'
+import { analyzePrefs } from '../domain/rules'
+import { analyzeGaps, type GapStatus } from '../domain/nutrients'
 
 type View = 'tag' | 'woche' | 'monat'
 const SLOT_ICON: Record<MealSlot, string> = { fruehstueck: '☕', mittag: '🍴', abend: '🌙', snack: '🍎' }
@@ -22,7 +24,9 @@ export function PlanPage() {
   const [add, setAdd] = useState<{ date: string } | null>(null)
   const [confirmNew, setConfirmNew] = useState(false)
 
+  const conflicts = analyzePrefs(state.prefs).conflicts
   const generate = () => {
+    if (conflicts.length) return
     const p = generatePlan({ profile: state.profile, foods: state.foods, recipes: state.recipes, prefs: state.prefs, startDate: start, days, seed: Math.floor(Math.random() * 1e6) })
     update(s => ({ ...s, plan: p, eaten: {}, shopping: { ...s.shopping, checked: [], removed: [] } }))
     setSel(p.days[0].date); setConfirmNew(false); setView('tag')
@@ -37,8 +41,9 @@ export function PlanPage() {
           <div><p className="font-medium mb-2">Planzeitraum</p><div className="flex flex-wrap gap-2">{PERIODS.map(p => <Chip key={p.days} active={days === p.days} onClick={() => setDays(p.days)}>{p.label}</Chip>)}</div></div>
           <label className="block"><span className="text-sm font-medium">Startdatum</span><input type="date" value={start} onChange={e => e.target.value && setStart(e.target.value)} className="block mt-1 rounded-2xl border border-sand bg-white px-3.5 py-2.5 min-h-11" /></label>
           <p className="text-sm text-muted">Kalorienziel: <b>{fmt(target)} kcal</b> · {state.profile.mealCount} Mahlzeiten · {state.profile.persons} Person(en) · {ctx.eligible.length} passende Rezepte</p>
+          {conflicts.map(c => <Notice key={c} level="error">Widerspruch in den Ernährungsweisen: {c}</Notice>)}
           {ctx.eligible.length === 0 && <Notice level="error">Mit deinen Einstellungen bleibt kein Rezept übrig. Lockere Ausschlüsse oder lege eigene Rezepte an.</Notice>}
-          <Btn onClick={generate} disabled={ctx.eligible.length === 0}>Plan erstellen →</Btn>
+          <Btn onClick={generate} disabled={ctx.eligible.length === 0 || conflicts.length > 0}>Plan erstellen →</Btn>
         </Card>
       </div>
     )
@@ -126,8 +131,9 @@ export function PlanPage() {
               </Card>
               <Card className="text-sm space-y-1">
                 <p><b>Öle:</b> {ctx.oils.warm ? `warm: ${ctx.foods.get(ctx.oils.warm)?.name}` : 'warm: –'}; {ctx.oils.cold ? `kalt: ${ctx.foods.get(ctx.oils.cold)?.name}` : 'kalt: –'}</p>
-                <p><b>Ernährungsweise:</b> {state.prefs.styles.join(', ')}</p>
+                <p><b>Ernährungsweise:</b> {state.prefs.styles.map(x => STYLE_LABEL[x] ?? x).join(', ')}</p>
               </Card>
+              <GapCard />
               {analysis && (
                 <Card className="space-y-2">
                   <div className="flex items-center justify-between"><p className="font-medium">Plan-Qualität</p><span className="font-serif text-2xl text-forest-dark">{fmt(analysis.score.total)}<span className="text-sm text-muted">/100</span></span></div>
@@ -252,5 +258,39 @@ function MonthView({ days, target, onPick }: { days: PlanDay[]; target: number; 
         })}
       </div>
     </div>
+  )
+}
+
+const GAP_LABEL: Record<GapStatus, string> = { ok: 'erreicht', borderline: 'knapp', low: 'niedrig', unknown: 'Datenlage unzureichend' }
+const GAP_COLOR: Record<GapStatus, string> = { ok: '#2f5d2a', borderline: '#d18a1c', low: '#a13a2e', unknown: '#9a9a8a' }
+
+/** Nährstoffbilanz des gesamten Plans (Ø pro Person und Tag): Zufuhr aus den Rezepten vs. Orientierungswert. */
+function GapCard() {
+  const { state, ctx } = useStore()
+  const [open, setOpen] = useState(false)
+  const report = useMemo(() => (state.plan ? analyzeGaps(state.plan, ctx, state.profile, state.prefs) : null), [state.plan, ctx, state.profile, state.prefs])
+  if (!report || !report.rows.length) return null
+  const flagged = report.rows.filter(r => r.status === 'low' || r.status === 'borderline').length
+  return (
+    <Card className="space-y-2">
+      <button className="w-full flex items-center justify-between text-left" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="font-medium">Nährstoffbilanz</span>
+        <span className="text-sm text-muted">{flagged ? `${flagged} unter Orientierung` : 'alle erreicht'} {open ? '▴' : '▾'}</span>
+      </button>
+      {open && (
+        <div className="space-y-2.5">
+          <p className="text-xs text-muted">Ø pro Person und Tag über {report.days} Plantage. Zufuhr = Berechnung aus den Rezepten; Referenz = Orientierungswert, keine individuelle Empfehlung.</p>
+          {report.rows.map(r => (
+            <div key={r.key}>
+              <div className="flex justify-between text-sm"><span>{r.label}</span><span className="text-muted">{r.status === 'unknown' ? '–' : `${fmt(r.intake, r.intake < 10 ? 1 : 0)} / ${fmt(r.reference, r.reference < 10 ? 1 : 0)} ${r.unit}`}</span></div>
+              <div className="h-2 rounded-full bg-sand/60 overflow-hidden"><div className="h-full rounded-full" style={{ width: `${Math.min(100, r.pct)}%`, background: GAP_COLOR[r.status] }} /></div>
+              <div className="text-xs" style={{ color: GAP_COLOR[r.status] }}>{GAP_LABEL[r.status]}{r.hardToReach ? ' · mit den vorhandenen Rezepten schwer erreichbar' : ''}{r.status !== 'unknown' && r.coverage < 0.95 ? ` · Datenabdeckung ${fmt(r.coverage * 100)} %` : ''}</div>
+            </div>
+          ))}
+          {report.dietNotes.map(d => <div key={d.diet} className="text-xs text-muted"><b>{d.diet}:</b> {d.notes.join(' ')}</div>)}
+          {report.caveats.map(c => <p key={c} className="text-xs text-muted">{c}</p>)}
+        </div>
+      )}
+    </Card>
   )
 }

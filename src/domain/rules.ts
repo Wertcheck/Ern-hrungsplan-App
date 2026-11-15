@@ -168,9 +168,10 @@ export function analyzePrefs(prefs: Preferences): PrefsAnalysis {
   if (prefs.oils.main && prefs.oils.excluded.includes(prefs.oils.main)) other.push('Das Hauptöl ist gleichzeitig ausgeschlossen (Ausschluss hat Vorrang).')
   for (const r of prefs.restrictions) if (r.severity === 'allergy' && INTOLERANCE_ONLY.includes(r.allergen))
     other.push(`${ALLERGEN_LABEL[r.allergen]} ist medizinisch meist eine Unverträglichkeit; als „Allergie“ markiert wird es besonders streng behandelt (auch unbekannte Zutaten und Spuren).`)
-  const ks = prefs.customRules.filter(r => r.enabled && r.kind === 'max_carb_pct')
-  if (ks.length && prefs.customRules.some(r => r.enabled && r.kind === 'min_protein_pct' && Number(r.value) + Number(ks[0].value) > 100))
-    other.push('Eigene Regeln (maximale Kohlenhydrate / minimales Eiweiß) lassen sich rechnerisch kaum gemeinsam erfüllen.')
+  const on = prefs.customRules.filter(r => r.enabled)
+  const num = (k: CustomRule['kind']) => on.filter(r => r.kind === k).map(r => Number(r.value))
+  const needP = Math.max(0, ...num('min_protein_pct'), 100 - Math.min(100, ...num('max_carb_pct')) - Math.min(100, ...num('max_fat_pct')))
+  if (needP > 60) other.push(`Die eigenen Regeln verlangen einen unrealistisch hohen Eiweißanteil (≥ ${Math.round(needP)} % der Energie); es werden voraussichtlich keine Rezepte übrig bleiben.`)
   return { ...c, other }
 }
 

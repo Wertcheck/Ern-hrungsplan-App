@@ -3,8 +3,10 @@ import { useStore } from '../store'
 import { Card, Chip, Field, NumInput, Notice, inputCls, cx, fmt } from '../ui/kit'
 import { ACTIVITY_LABEL, estimateKcal } from '../domain/nutrition'
 import { profileSchema } from '../domain/schemas'
-import { detectConflicts } from '../domain/rules'
-import { ALLERGENS, ALLERGEN_LABEL, STYLE_LABEL, type Activity, type Allergen, type Goal, type Profile, type Style, type Severity } from '../domain/types'
+import { analyzePrefs } from '../domain/rules'
+import { allDiets, getDiet } from '../domain/diets'
+import { customRuleSchema } from '../domain/schemas'
+import { ALLERGENS, ALLERGEN_LABEL, CATEGORIES, CATEGORY_LABEL, GROUP_LABEL, STYLE_LABEL, type Activity, type Allergen, type CustomRule, type FoodGroup, type Goal, type Profile, type RuleKind, type Style, type Severity } from '../domain/types'
 
 export const GOAL_LABEL: Record<Goal, string> = { halten: 'Gewicht halten', reduzieren: 'Gewicht reduzieren', aufbauen: 'Gewicht aufbauen', ausgewogen: 'Allgemein ausgewogen ernähren' }
 
@@ -86,13 +88,69 @@ export function StyleForm() {
     if (!next.length) next = ['mischkost']
     return { ...st, prefs: { ...st.prefs, styles: next } }
   })
-  const conflicts = detectConflicts(state.prefs)
-  const styleList: Style[] = ['mischkost', 'mediterran', 'basisch', 'vegetarisch', 'vegan', 'lowcarb', 'highprotein']
+  const a = analyzePrefs(state.prefs)
+  // Neutrale, alphabetische Reihenfolge – keine Weise wird hervorgehoben oder empfohlen
+  const list = allDiets().filter(d => (Object.keys(STYLE_LABEL) as string[]).includes(d.id)).sort((x, y) => x.label.localeCompare(y.label, 'de'))
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">{styleList.map(s => <Chip key={s} active={styles.includes(s)} onClick={() => toggle(s)}>{STYLE_LABEL[s]}</Chip>)}</div>
-      <p className="text-xs text-muted">Mehrere kompatible Stile können kombiniert werden („Individuelle Kombination“). Basische Ernährung wird hier als Ernährungsstil verstanden (viel Gemüse, Obst, Kräuter, Hülsenfrüchte) – ohne Aussage zum Blut-pH-Wert oder zu medizinischen Wirkungen.</p>
-      {conflicts.map(c => <Notice key={c} level="warn">{c}</Notice>)}
+      <div className="flex flex-wrap gap-2">{list.map(d => <Chip key={d.id} active={styles.includes(d.id as Style)} onClick={() => toggle(d.id as Style)} title={d.summary}>{d.label}</Chip>)}</div>
+      <p className="text-xs text-muted">Mehrere kompatible Weisen können kombiniert werden. Alle Weisen sind gleichrangig; die App bewertet keine Ernährungsweise als medizinisch überlegen. Eine Wechsel ist jederzeit möglich – ein bestehender Plan wird dann auf Regelverstöße geprüft.</p>
+      {a.conflicts.map(c => <Notice key={c} level="error">Widerspruch: {c} Ein Plan kann so nicht erstellt werden.</Notice>)}
+      {a.tensions.map(c => <Notice key={c} level="warn">{c}</Notice>)}
+      {a.infos.map(c => <Notice key={c} level="info">{c}</Notice>)}
+      {a.other.map(c => <Notice key={c} level="warn">{c}</Notice>)}
+      <div className="space-y-2">
+        {styles.map(id => { const d = getDiet(id); if (!d) return null; return (
+          <details key={id} className="rounded-2xl border border-sand/70 bg-white/60 px-3 py-2">
+            <summary className="cursor-pointer text-sm font-medium">Regeln: {d.label} – {d.summary}</summary>
+            <ul className="list-disc pl-5 text-sm text-muted mt-2 space-y-0.5">{d.definition.map(x => <li key={x}>{x}</li>)}</ul>
+            {(d.gapNotes ?? []).length > 0 && <div className="mt-2"><p className="text-sm font-medium">Allgemeine Hinweise (keine Diagnose)</p><ul className="list-disc pl-5 text-sm text-muted space-y-0.5">{d.gapNotes!.map(x => <li key={x}>{x}</li>)}</ul></div>}
+          </details>
+        ) })}
+      </div>
+    </div>
+  )
+}
+
+const RULE_LABEL: Record<RuleKind, string> = {
+  exclude_group: 'Lebensmittelgruppe ausschließen', exclude_category: 'Kategorie ausschließen', exclude_term: 'Begriff im Namen ausschließen',
+  max_carb_pct: 'Rezepte: max. Kohlenhydrat-Energieanteil (%)', min_protein_pct: 'Rezepte: min. Eiweiß-Energieanteil (%)', max_fat_pct: 'Rezepte: max. Fett-Energieanteil (%)',
+}
+
+/** Eigene Regeln: gelten zusätzlich zu den gewählten Ernährungsweisen als harte Bedingungen. */
+export function RulesForm() {
+  const { state, update } = useStore()
+  const rules = state.prefs.customRules
+  const [kind, setKind] = useState<RuleKind>('exclude_group')
+  const [val, setVal] = useState<string>('fisch')
+  const [name, setName] = useState('')
+  const numeric = kind.endsWith('_pct')
+  const set = (r: CustomRule[]) => update(s => ({ ...s, prefs: { ...s.prefs, customRules: r } }))
+  const changeKind = (k: RuleKind) => { setKind(k); setVal(k === 'exclude_group' ? 'fisch' : k === 'exclude_category' ? 'fisch' : k === 'exclude_term' ? '' : '25') }
+  const parsed = customRuleSchema.safeParse({ id: 'x', name: name.trim() || RULE_LABEL[kind], kind, value: numeric ? Number(val) : val, enabled: true })
+  const valid = parsed.success && (numeric ? Number(val) > 0 && Number(val) <= 100 : val.trim().length > 0)
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted">Eigene Regeln werden zusätzlich zu den Ernährungsweisen als feste Bedingungen angewendet (Allergien haben stets Vorrang und können dadurch nicht gelockert werden).</p>
+      <ul className="space-y-1.5">
+        {rules.map(r => (
+          <li key={r.id} className="flex items-center gap-2 rounded-2xl bg-white/70 border border-sand/70 px-3 py-2 text-sm">
+            <input type="checkbox" className="h-5 w-5 accent-[#2f5d2a]" checked={r.enabled} aria-label={`${r.name} aktiv`} onChange={() => set(rules.map(x => (x.id === r.id ? { ...x, enabled: !x.enabled } : x)))} />
+            <span className={cx('flex-1', !r.enabled && 'text-muted line-through')}><b>{r.name}</b> · {RULE_LABEL[r.kind]}: {String(r.value)}</span>
+            <button className="text-muted hover:text-danger px-2" aria-label={`${r.name} löschen`} onClick={() => set(rules.filter(x => x.id !== r.id))}>×</button>
+          </li>
+        ))}
+      </ul>
+      <div className="grid sm:grid-cols-4 gap-2 items-end">
+        <Field label="Regeltyp"><select className={inputCls} value={kind} onChange={e => changeKind(e.target.value as RuleKind)}>{(Object.keys(RULE_LABEL) as RuleKind[]).map(k => <option key={k} value={k}>{RULE_LABEL[k]}</option>)}</select></Field>
+        <Field label="Wert">
+          {kind === 'exclude_group' ? <select className={inputCls} value={val} onChange={e => setVal(e.target.value)}>{(Object.keys(GROUP_LABEL) as FoodGroup[]).map(g => <option key={g} value={g}>{GROUP_LABEL[g]}</option>)}</select>
+            : kind === 'exclude_category' ? <select className={inputCls} value={val} onChange={e => setVal(e.target.value)}>{CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}</select>
+            : <input className={inputCls} value={val} maxLength={60} inputMode={numeric ? 'numeric' : 'text'} onChange={e => setVal(e.target.value)} placeholder={numeric ? '1–100' : 'z. B. Koriander'} />}
+        </Field>
+        <Field label="Name (optional)"><input className={inputCls} value={name} maxLength={60} onChange={e => setName(e.target.value)} /></Field>
+        <button disabled={!valid} className="rounded-full bg-forest text-white px-5 min-h-11 disabled:opacity-40" onClick={() => { set([...rules, { id: `rule-${Date.now().toString(36)}`, name: name.trim() || RULE_LABEL[kind], kind, value: numeric ? Number(val) : val.trim(), enabled: true }]); setName('') }}>Hinzufügen</button>
+      </div>
     </div>
   )
 }
@@ -128,6 +186,10 @@ export function RestrictionForm() {
         })}
       </div>
       <Notice level="info"><b>Allergie</b> = strikter Ausschluss, auch bei unbekannter Zusammensetzung (z. B. eigene Lebensmittel ohne Allergenangabe). <b>Unverträglichkeit</b> = Lebensmittel mit diesem Inhaltsstoff werden ebenfalls nicht verwendet. Allergenangaben sind Richtwerte; Spuren und Kreuzkontaminationen werden nicht erfasst. Bei medizinisch relevanten Allergien immer Etiketten prüfen.</Notice>
+      <label className="flex items-start gap-2 text-sm rounded-2xl bg-white/70 border border-sand/70 px-3 py-2">
+        <input type="checkbox" className="h-5 w-5 mt-0.5 accent-[#2f5d2a]" checked={state.prefs.strictTraces} onChange={e => update(s => ({ ...s, prefs: { ...s.prefs, strictTraces: e.target.checked } }))} />
+        <span><b>Strenge Spurenregel bei Allergien</b> – auch Lebensmittel mit möglichen Spuren (Kreuzkontamination, z. B. Nuss-Spuren in Haferflocken) werden bei Allergien nicht verwendet. Empfohlen für echte Allergien; für Unverträglichkeiten ohne Wirkung.</span>
+      </label>
       <div>
         <p className="font-medium text-sm mb-1">Sonstige individuelle Ausschlüsse</p>
         <div className="flex gap-2">

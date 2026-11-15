@@ -19,7 +19,8 @@ export function maxPlausibleFactor(r: Recipe, foods: Map<string, Food>, oils: Oi
   let hi = FACTOR_MAX
   for (const i of resolveIngredients(r.ingredients, oils)) {
     const f = foods.get(i.foodId)
-    const cap = f ? MEAL_CAP_G[f.group] : undefined
+    // Getränke (z. B. Mandel-/Haferdrink) zählen nicht zu den gedeckelten Nuss-/Samen-Mengen
+    const cap = f && f.category !== 'getraenke' ? MEAL_CAP_G[f.group] : undefined
     if (cap && i.grams > 0) hi = Math.min(hi, cap / i.grams)
   }
   return Math.max(FACTOR_MIN, hi)

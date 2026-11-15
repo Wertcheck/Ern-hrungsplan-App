@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { useStore } from '../store'
 import { parseJsonText } from '../domain/persistence'
 import { Btn, Card, Notice, PageTitle } from '../ui/kit'
-import { OilForm, ProfileForm, RestrictionForm, StyleForm } from './forms'
+import { OilForm, ProfileForm, RestrictionForm, RulesForm, StyleForm } from './forms'
 import { defaultState } from '../domain/defaults'
 
 export function SettingsPage() {
@@ -39,6 +39,7 @@ export function SettingsPage() {
       {saveError && <Notice level="error">Speichern im Browser fehlgeschlagen (Speicher voll oder blockiert). Bitte exportiere deine Daten.</Notice>}
       <Card><h2 className="text-2xl mb-3">Persönliches Profil</h2><ProfileForm /></Card>
       <Card><h2 className="text-2xl mb-3">Ernährungsweise</h2><StyleForm /></Card>
+      <Card><h2 className="text-2xl mb-3">Eigene Regeln</h2><RulesForm /></Card>
       <Card><h2 className="text-2xl mb-3">Allergien &amp; Unverträglichkeiten</h2><RestrictionForm /></Card>
       <Card><h2 className="text-2xl mb-3">Öle &amp; Fette</h2><OilForm /></Card>
       <Notice level="info">Änderungen gelten für neu erzeugte Pläne. Ein bestehender Plan wird auf Regelverstöße geprüft und bei Bedarf markiert – er wird nicht automatisch verändert. Zum Anwenden im Plan „Neu generieren“.</Notice>

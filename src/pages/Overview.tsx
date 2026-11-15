@@ -2,7 +2,7 @@ import { useStore } from '../store'
 import { Bar, Btn, Card, Notice, PageTitle, Ring, fmt, todayISO, WEEKDAYS_LONG, parseISO, dateLabel } from '../ui/kit'
 import { dayTotals } from '../domain/planner'
 import { mealMacros } from '../domain/nutrition'
-import { SLOT_LABEL } from '../domain/types'
+import { SLOT_LABEL, STYLE_LABEL } from '../domain/types'
 import { RecipeThumb } from './RecipeDetail'
 import { macroTarget } from '../domain/rules'
 
@@ -60,7 +60,7 @@ export function OverviewPage({ go }: { go: (p: string) => void }) {
           <div className="grid sm:grid-cols-2 gap-2 text-sm">
             {[
               ['Unverträglichkeiten', state.prefs.restrictions.map(r => `${r.allergen} (${r.severity === 'allergy' ? 'Allergie' : 'Unv.'})`).join(', ') || 'keine'],
-              ['Ernährungsart', state.prefs.styles.join(', ')],
+              ['Ernährungsart', state.prefs.styles.map(x => STYLE_LABEL[x] ?? x).join(', ')],
               ['Bevorzugtes Öl', state.foods.find(f => f.id === state.prefs.oils.main)?.name ?? 'kein Hauptöl'],
               ['Kalorienziel', `${fmt(target)} kcal (${state.profile.kcalMode === 'auto' ? 'geschätzt' : 'manuell'})`],
             ].map(([k, v]) => (

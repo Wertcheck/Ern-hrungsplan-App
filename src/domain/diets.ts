@@ -47,6 +47,7 @@ export const MACRO_PRIORITY = ['keto', 'carnivore', 'lowcarb', 'highprotein']
 
 const registry = new Map<string, DietDef>()
 export function registerDiet(d: DietDef) { registry.set(d.id, d) }
+export const unregisterDiet = (id: string) => registry.delete(id)
 export const getDiet = (id: string) => registry.get(id)
 export const allDiets = () => [...registry.values()]
 
