@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Geräte-Probe (Ernährungsplan)</title>
+<style>body{font:16px system-ui,sans-serif;margin:0;padding:16px;background:#f7f4ec;color:#1f2a1f}button{font:inherit;padding:12px 16px;margin:6px 6px 6px 0;border-radius:14px;border:1px solid #2f5d3a;background:#2f5d3a;color:#fff}button.alt{background:#fff;color:#2f5d3a}pre{background:#fff;border:1px solid #d9d2bd;border-radius:12px;padding:10px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:50vh;overflow:auto}h1{font-size:20px}p{line-height:1.45}.n{font-size:13px;color:#555}</style></head>
+<body>
+<h1>Geräte-Probe: lokale KI &amp; Sprache</h1>
+<p>Diese Seite hat <b>keine Abhängigkeiten</b>, lädt <b>nichts aus dem Netz</b> und sendet <b>nichts</b>. Sie prüft nur, was dein Browser/Gerät kann, und führt kleine Rechentests aus. Es wird <b>kein KI-Modell geladen</b> und <b>kein Mikrofon aufgenommen</b> (außer du tippst ausdrücklich auf „Mikrofon-Test“).</p>
+<button id="run">1. Fähigkeiten prüfen</button>
+<button id="bench" class="alt">2. Rechentest (ca. 10 s)</button>
+<button id="mic" class="alt">3. Mikrofon-Test (3 s, lokal)</button>
+<button id="copy" class="alt">Ergebnis kopieren</button>
+<button id="dl" class="alt">Als Datei speichern</button>
+<p class="n">Bitte zusätzlich von Hand eintragen (nicht auslesbar): Arbeitsspeicher laut Einstellungen → Über das Telefon (8 oder 12 GB), Akkustand vorher/nachher, Gerätetemperatur gefühlt.</p>
+<pre id="out">Noch nichts gemessen.</pre>
+<script>
+(function(){'use strict'
+var R={schema:'ernaehrungsplan-probe-v1',note:'Alle Werte von diesem Gerät gemessen; fehlende Felder = nicht verfügbar/nicht gemessen.',time:new Date().toISOString()}
+var out=document.getElementById('out')
+function show(){out.textContent=JSON.stringify(R,null,2)}
+function wasm(b){try{return WebAssembly.validate(new Uint8Array(b))}catch(e){return false}}
+async function caps(){
+ var n=navigator
+ R.device={userAgent:n.userAgent,platform:n.platform||null,language:n.language,languages:n.languages?Array.from(n.languages):null,hardwareConcurrency:n.hardwareConcurrency||null,deviceMemoryGB_capped:n.deviceMemory||null,deviceMemoryNote:'Browser meldet gerundet/gedeckelt (max. 8). Echten RAM in den Android-Einstellungen ablesen.',screen:{w:screen.width,h:screen.height,dpr:window.devicePixelRatio},standalone:matchMedia('(display-mode: standalone)').matches,online:n.onLine}
+ R.isolation={crossOriginIsolated:!!window.crossOriginIsolated,sharedArrayBuffer:typeof SharedArrayBuffer!=='undefined',secureContext:!!window.isSecureContext}
+ R.wasm={available:typeof WebAssembly==='object',simd:wasm([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11]),threadsAtomics:wasm([0,97,115,109,1,0,0,0,1,4,1,96,0,0,3,2,1,0,5,4,1,3,1,1,10,11,1,9,0,65,0,254,16,2,0,26,11])}
+ R.webgpu={apiPresent:!!n.gpu}
+ if(n.gpu){try{var a=await n.gpu.requestAdapter();if(a){var inf=a.info||(a.requestAdapterInfo&&await a.requestAdapterInfo())||{};R.webgpu.adapter={vendor:inf.vendor||null,architecture:inf.architecture||null,device:inf.device||null,description:inf.description||null};R.webgpu.features=Array.from(a.features||[]);R.webgpu.shaderF16=R.webgpu.features.indexOf('shader-f16')>=0;var l=a.limits||{};R.webgpu.limits={maxBufferSize:l.maxBufferSize,maxStorageBufferBindingSize:l.maxStorageBufferBindingSize,maxComputeWorkgroupStorageSize:l.maxComputeWorkgroupStorageSize,maxComputeInvocationsPerWorkgroup:l.maxComputeInvocationsPerWorkgroup}}else R.webgpu.adapter=null}catch(e){R.webgpu.error=String(e)}}
+ R.speech={recognitionApi:!!(window.SpeechRecognition||window.webkitSpeechRecognition),recognitionNote:'Auf Android-Chrome läuft Web-Spracherkennung i. d. R. über Google-Server (Cloud) – hier NICHT geprüft, ob offline möglich.',synthesis:!!window.speechSynthesis,mediaRecorder:!!window.MediaRecorder,getUserMedia:!!(n.mediaDevices&&n.mediaDevices.getUserMedia),audioWorklet:!!(window.AudioContext&&AudioContext.prototype&&'audioWorklet' in AudioContext.prototype)}
+ try{if(window.speechSynthesis){var v=speechSynthesis.getVoices();if(!v.length){await new Promise(function(r){speechSynthesis.onvoiceschanged=r;setTimeout(r,1500)});v=speechSynthesis.getVoices()}R.speech.voices=v.filter(function(x){return /^de/i.test(x.lang)}).map(function(x){return{name:x.name,lang:x.lang,localService:x.localService}});R.speech.voiceCount=v.length}}catch(e){R.speech.voicesError=String(e)}
+ try{if(n.permissions)R.speech.micPermission=(await n.permissions.query({name:'microphone'})).state}catch(e){}
+ try{if(n.storage&&n.storage.estimate){var e=await n.storage.estimate();R.storage={quotaMB:Math.round(e.quota/1048576),usageMB:Math.round(e.usage/1048576),persisted:n.storage.persisted?await n.storage.persisted():null}}}catch(e){}
+ try{if(n.getBattery){var b=await n.getBattery();R.battery={level:b.level,charging:b.charging}}}catch(e){}
+ var c=n.connection;if(c)R.network={effectiveType:c.effectiveType,saveData:c.saveData}
+ R.serviceWorker='serviceWorker' in n
+ show()}
+function bench(){
+ R.bench={note:'Einfache JS-Rechentests: nur grobe Orientierung, KEIN Maß für LLM-Geschwindigkeit (tokens/s nicht gemessen).'}
+ var t0=performance.now(),N=384,A=new Float32Array(N*N).fill(1.0001),B=new Float32Array(N*N).fill(0.9999),C=new Float32Array(N*N)
+ for(var i=0;i<N;i++)for(var k=0;k<N;k++){var a=A[i*N+k];for(var j=0;j<N;j++)C[i*N+j]+=a*B[k*N+j]}
+ var ms=performance.now()-t0;R.bench.matmul384_ms=Math.round(ms);R.bench.matmul384_gflops=+((2*N*N*N)/(ms/1000)/1e9).toFixed(3)
+ var arr=[];try{var t1=performance.now();for(var m=0;m<64;m++){arr.push(new Float32Array(4*1024*1024))}R.bench.allocatedMB=256;R.bench.alloc_ms=Math.round(performance.now()-t1)}catch(e){R.bench.allocError=String(e);R.bench.allocatedMB=arr.length*16}
+ arr=null
+ R.bench.hint='Wenn allocatedMB < 256 oder allocError gesetzt: Speicher für große Modelle im Browser sehr knapp.'
+ show()}
+async function mic(){
+ try{var s=await navigator.mediaDevices.getUserMedia({audio:true});var ac=new (window.AudioContext||window.webkitAudioContext)();var src=ac.createMediaStreamSource(s);var an=ac.createAnalyser();src.connect(an);var d=new Float32Array(an.fftSize),peak=0,t0=performance.now();
+ await new Promise(function(res){(function tick(){an.getFloatTimeDomainData(d);for(var i=0;i<d.length;i++)peak=Math.max(peak,Math.abs(d[i]));if(performance.now()-t0<3000)setTimeout(tick,50);else res()})()});
+ s.getTracks().forEach(function(t){t.stop()});ac.close();R.mic={ok:true,sampleRate:ac.sampleRate,peakAmplitude:+peak.toFixed(3),note:'Nur Pegel gemessen, nichts aufgezeichnet/gespeichert/gesendet.'}}catch(e){R.mic={ok:false,error:String(e&&e.name||e)}}
+ show()}
+document.getElementById('run').onclick=function(){caps().catch(function(e){R.error=String(e);show()})}
+document.getElementById('bench').onclick=function(){out.textContent='läuft …';setTimeout(bench,50)}
+document.getElementById('mic').onclick=function(){out.textContent='Bitte kurz sprechen …';mic()}
+document.getElementById('copy').onclick=function(){navigator.clipboard&&navigator.clipboard.writeText(JSON.stringify(R,null,2)).then(function(){alert('Kopiert')},function(){alert('Kopieren nicht möglich – bitte „Als Datei speichern“.')})}
+document.getElementById('dl').onclick=function(){var u=URL.createObjectURL(new Blob([JSON.stringify(R,null,2)],{type:'application/json'}));var a=document.createElement('a');a.href=u;a.download='probe-s23.json';a.click()}
+})()
+</script></body></html>
