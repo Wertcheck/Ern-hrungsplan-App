@@ -11,6 +11,7 @@
  <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen2.5-1.5B (~1,6 GB Speicherbedarf)</option>
  <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen2.5-0.5B (~0,9 GB, schwächer)</option>
 </select><br>
+<label class="n"><input type="checkbox" id="gram"> JSON-Grammatik erzwingen (auf dem S23 bisher: Fehler – nur zum Gegentest)</label><br>
 <button id="load">1. Modell laden</button>
 <button id="run" class="alt" disabled>2. Testbefehle ausführen</button>
 <button id="copy" class="alt">Ergebnis kopieren</button>
@@ -61,13 +62,14 @@ $('run').onclick=async()=>{
  for(const [text,check] of TESTS){
   st.textContent='Test: '+text;const t0=performance.now();let ttft=null,acc='',usage=null,err=null
   try{
-   const s=await engine.chat.completions.create({messages:[{role:'system',content:SYSTEM},{role:'user',content:text}],temperature:0,max_tokens:120,stream:true,stream_options:{include_usage:true},response_format:{type:'json_object'}})
+   const s=await engine.chat.completions.create({messages:[{role:'system',content:SYSTEM},{role:'user',content:text}],temperature:0,max_tokens:120,stream:true,stream_options:{include_usage:true},...($('gram').checked?{response_format:{type:'json_object'}}:{})})
    for await(const c of s){const d=c.choices[0]?.delta?.content;if(d){if(ttft===null)ttft=performance.now()-t0;acc+=d}if(c.usage)usage=c.usage}
   }catch(e){err=String(e&&e.message||e)}
   const total=performance.now()-t0;let parsed=null,valid=false,correct=false
-  try{parsed=JSON.parse(acc);valid=true;correct=!!check(parsed)}catch(e){}
-  R.runs.push({input:text,output:acc,validJson:valid,correctAction:correct,ttft_ms:ttft===null?null:Math.round(ttft),total_ms:Math.round(total),prefill_tps:usage?.extra?.prefill_tokens_per_s??null,decode_tps:usage?.extra?.decode_tokens_per_s??null,tokens:usage?.completion_tokens??null,error:err})
-  show()}
+  try{const m=acc.match(/\{[\s\S]*\}/);parsed=JSON.parse(m?m[0]:acc);valid=true;correct=!!check(parsed)}catch(e){}
+  R.runs.push({grammar:$('gram').checked,input:text,output:acc,validJson:valid,correctAction:correct,ttft_ms:ttft===null?null:Math.round(ttft),total_ms:Math.round(total),prefill_tps:usage?.extra?.prefill_tokens_per_s??null,decode_tps:usage?.extra?.decode_tokens_per_s??null,tokens:usage?.completion_tokens??null,error:err})
+  show()
+  if(err&&/disposed/.test(err)){R.runError='Engine nach Fehler unbrauchbar – Seite neu laden und Modell neu laden.';break}}
  }catch(e){R.runError=String(e&&e.message||e);show()}
  R.summary={tests:R.runs.length,validJson:R.runs.filter(r=>r.validJson).length,correct:R.runs.filter(r=>r.correctAction).length,note:'Nur 6 feste Sätze: eine Stichprobe, KEINE Aussage über Genauigkeit im Alltag.'}
  R.runEnd={battery:await bat()};st.textContent='Fertig: '+R.summary.correct+'/'+R.summary.tests+' korrekt.';$('run').disabled=false;show()}
