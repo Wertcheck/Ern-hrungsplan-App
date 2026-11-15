@@ -94,7 +94,7 @@ export function StyleForm() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-2">{list.map(d => <Chip key={d.id} active={styles.includes(d.id as Style)} onClick={() => toggle(d.id as Style)} title={d.summary}>{d.label}</Chip>)}</div>
-      <p className="text-xs text-muted">Mehrere kompatible Weisen können kombiniert werden. Alle Weisen sind gleichrangig; die App bewertet keine Ernährungsweise als medizinisch überlegen. Eine Wechsel ist jederzeit möglich – ein bestehender Plan wird dann auf Regelverstöße geprüft.</p>
+      <p className="text-xs text-muted">Mehrere kompatible Weisen können kombiniert werden. Alle Weisen sind gleichrangig; die App bewertet keine Ernährungsweise als medizinisch überlegen. Ein Wechsel ist jederzeit möglich – ein bestehender Plan wird dann auf Regelverstöße geprüft.</p>
       {a.conflicts.map(c => <Notice key={c} level="error">Widerspruch: {c} Ein Plan kann so nicht erstellt werden.</Notice>)}
       {a.tensions.map(c => <Notice key={c} level="warn">{c}</Notice>)}
       {a.infos.map(c => <Notice key={c} level="info">{c}</Notice>)}
@@ -141,7 +141,7 @@ export function RulesForm() {
           </li>
         ))}
       </ul>
-      <div className="grid sm:grid-cols-4 gap-2 items-end">
+      <div className="grid md:grid-cols-[2fr_1.2fr_1fr_auto] gap-2 items-end">
         <Field label="Regeltyp"><select className={inputCls} value={kind} onChange={e => changeKind(e.target.value as RuleKind)}>{(Object.keys(RULE_LABEL) as RuleKind[]).map(k => <option key={k} value={k}>{RULE_LABEL[k]}</option>)}</select></Field>
         <Field label="Wert">
           {kind === 'exclude_group' ? <select className={inputCls} value={val} onChange={e => setVal(e.target.value)}>{(Object.keys(GROUP_LABEL) as FoodGroup[]).map(g => <option key={g} value={g}>{GROUP_LABEL[g]}</option>)}</select>

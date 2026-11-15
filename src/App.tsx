@@ -21,8 +21,8 @@ const NAV: { id: string; label: string; icon: string }[] = [
   { id: 'fortschritt', label: 'Fortschritt', icon: '📈' },
   { id: 'einstellungen', label: 'Einstellungen', icon: '⚙️' },
 ]
-const MOBILE = ['uebersicht', 'plan', 'rezepte', 'einkauf', 'mehr']
-const SHORT: Record<string, string> = { uebersicht: 'Übersicht', plan: 'Plan', rezepte: 'Rezepte', einkauf: 'Einkauf', mehr: 'Mehr' }
+const MOBILE = ['uebersicht', 'plan', 'berater', 'einkauf', 'mehr']
+const SHORT: Record<string, string> = { uebersicht: 'Übersicht', plan: 'Plan', berater: 'Berater', einkauf: 'Einkauf', mehr: 'Mehr' }
 
 const readHash = () => (location.hash.replace('#/', '') || 'uebersicht')
 
@@ -33,7 +33,7 @@ export default function App() {
   useEffect(() => { const h = () => { setPage(readHash()); window.scrollTo(0, 0) }; window.addEventListener('hashchange', h); return () => window.removeEventListener('hashchange', h) }, [])
   const go = (p: string) => { location.hash = `#/${p}` }
   if (!state.onboarded) return <Onboarding onDone={() => go('plan')} />
-  const more = ['lebensmittel', 'fortschritt', 'einstellungen']
+  const more = ['rezepte', 'lebensmittel', 'fortschritt', 'einstellungen']
   const isMore = more.includes(page) || page === 'mehr'
   const body = {
     uebersicht: <OverviewPage go={go} />, lebensmittel: <FoodsPage />, plan: <PlanPage />, rezepte: <RecipesPage />,
@@ -67,11 +67,17 @@ export default function App() {
       )}
       {!ai.open && (
         <button onClick={() => ai.setOpen(true)} aria-label="Ernährungsberater öffnen"
-          className="fixed z-40 right-4 bottom-20 lg:bottom-6 h-14 w-14 rounded-full bg-forest text-white shadow-lg text-2xl grid place-items-center hover:bg-forest-dark">💬</button>
+          className="hidden lg:grid fixed z-40 right-6 bottom-6 h-14 w-14 rounded-full bg-forest text-white shadow-lg text-2xl place-items-center hover:bg-forest-dark">💬</button>
       )}
       <nav aria-label="Hauptnavigation" className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-paper/95 backdrop-blur border-t border-sand safe-b">
         <ul className="grid grid-cols-5">
           {MOBILE.map(id => {
+            if (id === 'berater') return (
+              <li key={id} className="grid place-items-center">
+                <button onClick={() => ai.setOpen(true)} aria-label="Ernährungsberater öffnen" className="-mt-5 h-14 w-14 rounded-full bg-forest text-white shadow-lg text-2xl grid place-items-center border-4 border-cream hover:bg-forest-dark">💬</button>
+                <span className="text-[11px] text-muted -mt-0.5 pb-1">Berater</span>
+              </li>
+            )
             const n = NAV.find(x => x.id === id)
             const active = id === 'mehr' ? isMore : page === id
             return (

@@ -1,37 +1,29 @@
 # Ernährungsplan – persönlicher Ernährungsplaner (PWA)
 
-Lokale, responsive Progressive Web App (React + TypeScript + Vite + Tailwind). Alle Daten bleiben im Browser (localStorage); es gibt kein Backend, keine Konten, kein Tracking.
+Lokale, responsive PWA (React + TypeScript + Vite + Tailwind). Daten bleiben im Browser (`localStorage`). Optional: KI-Berater über ein lokales FastAPI-Backend (OpenAI **oder** Claude). Die App funktioniert vollständig ohne KI und offline.
+
+**Funktionen:** Profil/Kalorienziel · 12 Ernährungsweisen (kombinierbar, eigene Regeln) · Lebensmittel mit **BLS 4.0** (7.140 durchsuchbar) · Allergien/Unverträglichkeiten · Pläne 7–30 Tage · Rezepte · Einkaufsliste · Nährstoffbilanz · Fortschritt · Export/Import/Löschen · KI-Chat mit Engine-geprüften Vorschlägen.
 
 ## Start
 ```bash
 npm install
-npm run dev        # Entwicklung, http://localhost:5173 (auch im LAN erreichbar → Smartphone)
-npm run build && npm run preview   # Produktions-Build, http://localhost:4173
-npm test           # Vitest
-npm run typecheck
+npm run dev                 # http://localhost:5173
+npm run build && npm run preview   # http://localhost:4173 (PWA/Offline nur im Build)
+npm test                    # 165 Tests
 ```
-Auf Android: Seite im Chrome öffnen → Menü → „Zum Startbildschirm hinzufügen“. Für den Zugriff vom Handy muss die App über HTTPS oder `localhost` erreichbar sein, damit der Service Worker (Offline-Cache) aktiv wird.
+**KI-Backend (optional):**
+```bash
+python3 -m venv backend/.venv && backend/.venv/bin/pip install -r backend/requirements-dev.txt
+python -m backend            # 127.0.0.1:8787; Vite leitet /api weiter
+python -m backend.check_env  # prüft .env, zeigt nie Werte (--live = Verbindungstest)
+```
+Schlüssel stehen **nur** in deiner `.env` (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`); Details und Windows-Beispiel in `AI_PROVIDER_GUIDE.md`. Android: Chrome → „Zum Startbildschirm hinzufügen“ (HTTPS oder `localhost` nötig).
 
-## Architektur
-- `src/domain/` – reine Logik, UI-unabhängig und getestet: `nutrition` (Kalorien/Makros, Mifflin-St-Jeor), `rules` (Allergien, Ausschlüsse, Stile, Öle), `planner` (Planung + Bewertung), `planops` (Austauschen/Löschen/Ergänzen), `shopping`, `schemas` (zod).
-- `src/data/` – Lebensmittel (~100) und Rezepte (~50).
-- `src/pages/`, `src/ui/`, `src/store.tsx` – Oberfläche und lokaler Zustand.
+## Dokumentation
+`IMPLEMENTATION_STATUS.md` (was ist wie geprüft) · `QA_REPORT.md` · `SECURITY_REPORT.md` · `PROJECT_AUDIT.md` · `SKILL_AUDIT.md` · `ARCHITECTURE.md` · `BLS_INTEGRATION.md` · `AI_ARCHITECTURE.md` · `AI_PROVIDER_GUIDE.md` · `AI_PRIVACY.md` · `AI_COST_CONTROL.md`.
 
-## Technische Entscheidungen
-- **Kein FastAPI/SQLite**: Einzelnutzer, lokal → ein Backend wäre unnötige Infrastruktur. Persistenz via localStorage mit zod-validiertem Laden/Import; Export/Import/Vollständiges Löschen in den Einstellungen.
-- **Planungsalgorithmus** (deterministisch, nur minimaler seed-basierter Tie-Breaker): Pro Tag und Mahlzeit werden zulässige Rezepte bewertet (Kalorienpassung, Präferenzen/Favoriten, Stil-Passung, Makroverteilung, Wiederholungsstrafe, gleiche Hauptzutat am Vortag, Mitnutzen frischer Zutaten gegen Verschwendung, seltene Zutaten). Portionsfaktoren (0,6×–1,8×, 0,05er-Schritte) werden pro Tag feinjustiert. `analyzePlan` liefert einen Score (Kalorien 30 %, Makros 15 %, Präferenzen 20 %, Vielfalt 15 %, Wiederholungen 10 %, Verfügbarkeit 10 %) und transparente Hinweise, wenn Ziele nicht erreichbar sind.
-- **Allergien**: Allergie = Ausschluss auch bei unbekannter Allergeninfo; Unverträglichkeit = Ausschluss markierter Lebensmittel. Rezepte mit Zutaten ohne Allergeninfo werden nie als allergenfrei dargestellt. Bestehende Pläne werden bei geänderten Regeln auf Verstöße geprüft und markiert.
-- **Öle** sind Platzhalter in Rezepten (`oil:warm`/`oil:cold`) und werden anhand Hauptöl, Zuordnung, Hitzeeignung, Ausschlüssen und Allergien aufgelöst; sie fließen vollständig in Kalorien und Einkaufsliste ein.
-- **Basische Ernährung** ist nur ein Ernährungsstil (Gemüse/Obst/Kräuter/Hülsenfrüchte bevorzugt); keine pH-Aussagen.
+## Datenquellen und Lizenz
+Nährwerte (99 Standard-Lebensmittel): **Bundeslebensmittelschlüssel 4.0**, Max Rubner-Institut, CC BY 4.0 – *Max Rubner-Institut (2025): Bundeslebensmittelschlüssel (BLS), Version 4.0 — Deutsche Nährstoffdatenbank. Karlsruhe. DOI: 10.25826/Data20251217-134202-0.* Übrige Lebensmittel sind als „Richtwert (nicht verifiziert)“ gekennzeichnet. Allergen-/Spurenangaben sind Näherungen ohne Gewähr.
 
-## Datenquelle und Lizenz
-Nährwerte sind gerundete Richtwerte in Anlehnung an USDA FoodData Central (Public Domain / CC0) und **nicht einzeln gegen die Quelle verifiziert** (`verified: false`). Eigene/geänderte Werte gelten nie als verifiziert. Allergen-/Histamin-/Fruktose-Tags sind Näherungen ohne Spurenangaben.
-
-## Bekannte Einschränkungen / offen
-- Keine echten Lebensmittelfotos (Emoji-Kacheln, da keine lizenzfreien Bilder offline verfügbar).
-- Lebensmitteldatenbank klein (~100 Einträge), kein Import externer Datenbanken (z. B. BLS/Open Food Facts) – Datenmodell ist erweiterbar.
-- „Öle bestimmten Zubereitungsarten zuordnen“ ist auf warm/kalt beschränkt.
-- Mikronährstoffe sind im Datenmodell vorgesehen, aber nicht befüllt.
-- Ab ca. 2.800+ kcal bei 3 Mahlzeiten wird die Portionsgrenze erreicht (wird im Plan als Warnung angezeigt).
-- Backups nur manuell (JSON-Export); localStorage-Limit ca. 5 MB.
-- Keine optionale KI-Integration.
+## Hinweis
+Informations- und Planungshilfe, keine ärztliche oder ernährungsmedizinische Beratung; bei Allergien immer Etiketten prüfen. Keine Ernährungsweise wird als medizinisch überlegen dargestellt.

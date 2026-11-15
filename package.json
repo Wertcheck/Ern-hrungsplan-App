@@ -1,14 +1,19 @@
 {
   "name": "ernaehrungsplan",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "backend": "backend/.venv/bin/python -m backend",
+    "backend:test": "backend/.venv/bin/pytest backend/tests -q",
+    "bls:test": "python -m pytest scripts/bls/test_bls_import.py -q",
+    "e2e:app": "node e2e/app.cjs http://localhost:4173 /tmp/e2e/app",
+    "e2e:ai": "node e2e/ai.cjs http://localhost:4173 /tmp/e2e/ai"
   },
   "dependencies": {
     "react": "^19.3.1",
