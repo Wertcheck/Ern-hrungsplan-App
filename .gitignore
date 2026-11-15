@@ -1,3 +1,15 @@
 node_modules
 dist
 *.log
+
+# Backend / Secrets / lokale Daten
+.env
+.env.*
+!.env.example
+backend/.env
+backend/data/
+backend/.venv/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
