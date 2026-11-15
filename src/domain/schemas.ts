@@ -83,7 +83,7 @@ export const aiSchema = z.object({
   chat: z.array(z.object({
     id: str(80), role: z.enum(['user', 'assistant']), content: z.string().max(20000), ts: str(60),
     provider: z.string().optional(), model: z.string().optional(), error: z.string().optional(),
-    actions: z.array(z.object({ id: str(80), proposal: z.record(z.string(), z.unknown()), status: z.enum(['pending', 'applied', 'dismissed', 'rejected']), note: z.string().optional() })).optional(),
+    actions: z.array(z.object({ id: str(80), proposal: z.record(z.string(), z.unknown()), status: z.enum(['pending', 'applied', 'dismissed', 'rejected']), note: z.string().optional(), summary: z.object({ title: z.string().max(200), lines: z.array(z.string().max(400)).max(10) }).optional() })).optional(),
   })).max(300),
 })
 

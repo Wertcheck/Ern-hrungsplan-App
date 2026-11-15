@@ -62,7 +62,7 @@ export function AiProvider({ children, client }: { children: ReactNode; client?:
   const commit = useCallback((m: ChatMessage) => update(s => ({ ...s, ai: { ...s.ai, chat: [...s.ai.chat, m].slice(-MAX_CHAT) } })), [update])
   const toActions = useCallback((props: Proposal[], extraRejected: { type: string; reason: string }[] = []): ChatAction[] => {
     const st = stateRef.current, c = buildContext(st.foods, st.recipes, st.prefs)
-    const acts: ChatAction[] = props.map(p => { const v = validateProposal(p, st, c); return v.ok ? { id: uid(), proposal: p as unknown as Record<string, unknown>, status: 'pending' as const } : { id: uid(), proposal: p as unknown as Record<string, unknown>, status: 'rejected' as const, note: v.reason } })
+    const acts: ChatAction[] = props.map(p => { const v = validateProposal(p, st, c); return v.ok ? { id: uid(), proposal: p as unknown as Record<string, unknown>, status: 'pending' as const, summary: { title: v.preview.title, lines: v.preview.lines } } : { id: uid(), proposal: p as unknown as Record<string, unknown>, status: 'rejected' as const, note: v.reason } })
     for (const r of extraRejected) acts.push({ id: uid(), proposal: { type: r.type }, status: 'rejected', note: r.reason })
     return acts
   }, [])
@@ -121,7 +121,10 @@ export function AiProvider({ children, client }: { children: ReactNode; client?:
     if (!a || a.status !== 'pending') return s
     const r = confirmProposal(a.proposal, s)          // Engine validiert erneut gegen den aktuellen Zustand
     if (!r.ok) return setActionState(msgId, actionId, 'rejected', r.reason)(s)
-    return setActionState(msgId, actionId, 'applied')(r.state)
+    // Weitere Alternativen für dieselbe Mahlzeit aus derselben Nachricht sind nach der Wahl überholt
+    const mealId = (a.proposal as { meal_id?: string }).meal_id
+    const next = setActionState(msgId, actionId, 'applied')(r.state)
+    return !mealId ? next : { ...next, ai: { ...next.ai, chat: next.ai.chat.map(m => (m.id !== msgId ? m : { ...m, actions: m.actions?.map(x => (x.id !== actionId && x.status === 'pending' && (x.proposal as { meal_id?: string }).meal_id === mealId ? { ...x, status: 'dismissed' as const, note: 'andere Variante gewählt' } : x)) })) } }
   }), [update])
   const dismissAction = useCallback((msgId: string, actionId: string) => update(setActionState(msgId, actionId, 'dismissed')), [update])
 

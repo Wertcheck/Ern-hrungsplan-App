@@ -6,6 +6,7 @@ import { validateProposal } from './actions'
 import type { ChatAction, ChatMessage } from '../domain/types'
 
 const SUGGESTIONS = ['Tausche das Mittagessen heute', 'Erkläre mein Kalorienziel', 'Welche Nährstoffe fehlen im Plan?', 'Erkläre die Ernährungsweise Keto']
+const TYPE_LABEL: Record<string, string> = { swap_meal: 'Mahlzeit austauschen', add_meal: 'Mahlzeit ergänzen', remove_meal: 'Mahlzeit entfernen', set_portion: 'Portion anpassen', create_recipe: 'Neues Rezept', exclude_food: 'Lebensmittel ausschließen', add_shopping_item: 'Zur Einkaufsliste' }
 const PROVIDER_LABEL: Record<string, string> = { openai: 'OpenAI', anthropic: 'Claude', mock: 'Test-Anbieter', local: 'Lokal' }
 
 /** Minimale, sichere Darstellung: **fett** und Aufzählungen; alles andere bleibt Text (React escaped). */
@@ -21,7 +22,8 @@ function ActionCard({ msg, a }: { msg: ChatMessage; a: ChatAction }) {
   const tone = a.status === 'applied' ? 'border-forest bg-moss/60' : a.status === 'rejected' ? 'border-danger/40 bg-danger/5' : 'border-sand bg-white/80'
   return (
     <div className={cx('rounded-2xl border p-3 mt-2 text-sm', tone)}>
-      <div className="font-semibold mb-1">{v?.ok ? v.preview.title : String(a.proposal.type ?? 'Vorschlag').replace(/_/g, ' ')}</div>
+      <div className="font-semibold mb-1">{v?.ok ? v.preview.title : a.summary?.title ?? TYPE_LABEL[String(a.proposal.type)] ?? 'Vorschlag'}</div>
+      {a.status !== 'pending' && a.summary && <ul className="space-y-0.5 text-[13px] text-muted">{a.summary.lines.slice(0, 2).map((l, i) => <li key={i}>{l}</li>)}</ul>}
       {v?.ok && <><ul className="space-y-0.5 text-[13px]">{v.preview.lines.map((l, i) => <li key={i}>{l}</li>)}</ul>{v.preview.warnings.map(w => <div key={w} className="text-warn text-xs mt-1">⚠ {w}</div>)}</>}
       {a.status === 'pending' && v && !v.ok && <div className="text-danger text-xs">Von der Engine abgelehnt: {v.reason}</div>}
       {a.status === 'rejected' && <div className="text-danger text-xs">Abgelehnt: {a.note ?? 'Engine-Prüfung nicht bestanden'}</div>}
@@ -70,7 +72,7 @@ export function ChatPanel() {
   const [input, setInput] = useState('')
   const [showData, setShowData] = useState(false)
   const end = useRef<HTMLDivElement>(null)
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }) }, [state.ai.chat.length, ai.draft?.content])
+  useEffect(() => { if (state.ai.chat.length || ai.draft) end.current?.scrollIntoView({ block: 'end' }) }, [state.ai.chat.length, ai.draft?.content])
   const submit = () => { const t = input.trim(); if (!t) return; setInput(''); void ai.send(t) }
   const cloud = ai.mode === 'cloud'
   const provider = ai.status?.provider

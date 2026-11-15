@@ -20,7 +20,9 @@ export function AiSettingsCard() {
   const load = useCallback(async () => { try { setS(await ai.client.getSettings()) } catch { setS(null) } }, [ai.client])
   useEffect(() => { void load() }, [load, ai.status?.enabled])
   const save = async (patch: Parameters<typeof ai.client.updateSettings>[0]) => {
-    try { setS(await ai.client.updateSettings(patch)); await ai.refreshStatus(); setMsg(null) } catch (e) { setMsg({ level: 'error', text: (e as Error).message }) }
+    // optimistisch: Oberfläche reagiert sofort, der Server-Stand ersetzt sie anschließend (bei Fehler wird zurückgesetzt)
+    setS(cur => (cur ? { ...cur, ...patch, models: patch.models ? { ...cur.models, ...patch.models } : cur.models } as Settings : cur))
+    try { setS(await ai.client.updateSettings(patch)); await ai.refreshStatus(); setMsg(null) } catch (e) { setMsg({ level: 'error', text: (e as Error).message }); void load() }
   }
   const loadModels = async (p: 'openai' | 'anthropic') => { setBusy(true); try { setModels(m => ({ ...m, [p]: undefined })); setModels(m => ({ ...m, [p]: undefined })); const r = await ai.client.models(p); setModels(m => ({ ...m, [p]: r })) } catch (e) { setMsg({ level: 'error', text: (e as Error).message }) } finally { setBusy(false) } }
   const test = async () => { if (!s) return; setBusy(true); try { const r = await ai.client.test(s.provider); setMsg({ level: r.ok ? 'info' : 'error', text: r.ok ? `Verbindung zu ${s.provider} OK (${r.latency_ms} ms).` : `Verbindung fehlgeschlagen: ${r.detail ?? 'unbekannt'}` }) } catch (e) { setMsg({ level: 'error', text: (e as Error).message }) } finally { setBusy(false) } }

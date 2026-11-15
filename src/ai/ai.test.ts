@@ -145,6 +145,14 @@ describe('Nutrition-Context: Datenminimierung', () => {
     const names = JSON.stringify(cat)
     expect(names).not.toMatch(/Walnuss|Mandel|Haferflocken|Lachs|Hähnchen|Rinder/)
   })
+  it('Rezeptkatalog: die in der Frage genannte Mahlzeitenart steht zuerst', () => {
+    const s = mk(), c = cx(s)
+    for (const [text, slot] of [['Tausche das Frühstück', 'fruehstueck'], ['Alternativen fürs Abendessen', 'abend'], ['Tausche den Snack', 'snack']] as const) {
+      const cat = buildAiContext(s, c, text, T0, 2200).payload.recipe_catalog as { slots: string[] }[]
+      expect(cat[0].slots, text).toContain(slot)
+      expect(cat.slice(0, 5).every(r => r.slots.includes(slot)), text).toBe(true)
+    }
+  })
   it('Lebensmittelliste (nur bei Rezept-Erstellung) enthält keine unzulässigen Lebensmittel', () => {
     const s = mk({ restrictions: [{ allergen: 'soja', severity: 'allergy' }], styles: ['vegetarisch'] })
     const b = buildAiContext(s, cx(s), 'Erstelle ein Rezept aus meinen Zutaten', T0, 2200)

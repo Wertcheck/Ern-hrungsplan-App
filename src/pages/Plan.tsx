@@ -273,9 +273,9 @@ function GapCard() {
   const flagged = report.rows.filter(r => r.status === 'low' || r.status === 'borderline').length
   return (
     <Card className="space-y-2">
-      <button className="w-full flex items-center justify-between text-left" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button className="w-full flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-left" aria-expanded={open} onClick={() => setOpen(!open)}>
         <span className="font-medium">Nährstoffbilanz</span>
-        <span className="text-sm text-muted">{flagged ? `${flagged} unter Orientierung` : 'alle erreicht'} {open ? '▴' : '▾'}</span>
+        <span className="text-xs text-muted">{flagged ? `${flagged} unter Orientierung` : 'alle erreicht'} {open ? '▴' : '▾'}</span>
       </button>
       {open && (
         <div className="space-y-2.5">

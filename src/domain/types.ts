@@ -208,7 +208,7 @@ export interface ShoppingState {
 
 export interface AiShare { body: boolean; plan: boolean; shopping: boolean; progress: boolean; foodPrefs: boolean }
 export type ActionStatus = 'pending' | 'applied' | 'dismissed' | 'rejected'
-export interface ChatAction { id: string; proposal: Record<string, unknown>; status: ActionStatus; note?: string }
+export interface ChatAction { id: string; proposal: Record<string, unknown>; status: ActionStatus; note?: string; /** Kurzfassung der Engine-Vorschau zum Zeitpunkt des Vorschlags */ summary?: { title: string; lines: string[] } }
 export interface ChatMessage { id: string; role: 'user' | 'assistant'; content: string; ts: string; provider?: string; model?: string; error?: string; actions?: ChatAction[] }
 export interface AiState { consent: boolean; share: AiShare; chat: ChatMessage[] }
 

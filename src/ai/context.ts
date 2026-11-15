@@ -34,6 +34,12 @@ export function scopeFor(text: string): Scope {
   }
 }
 
+/** Mahlzeitenart, auf die sich die Frage bezieht (falls genannt). */
+export function slotHint(text: string): 'fruehstueck' | 'mittag' | 'abend' | 'snack' | null {
+  const t = text.toLowerCase()
+  return /frühstück|fruehstueck/.test(t) ? 'fruehstueck' : /mittag/.test(t) ? 'mittag' : /abend/.test(t) ? 'abend' : /snack|zwischenmahlzeit/.test(t) ? 'snack' : null
+}
+
 export interface BuiltContext { payload: NutritionContextPayload; included: string[]; json: string; chars: number; scope: Scope }
 
 const nm = (s: AppState, id: string) => s.foods.find(f => f.id === id)?.name ?? id
@@ -85,13 +91,16 @@ export function buildAiContext(state: AppState, ctx: PlanContext, text: string, 
     included.push(`Ernährungsplan (${slice.length} Tag${slice.length === 1 ? '' : 'e'})`)
     // Katalog nur zulässiger Rezepte (Allergien/Regeln bereits berücksichtigt) – die KI kann nur daraus wählen
     if (sc.recipes) {
+      // Die in der Frage genannte Mahlzeitenart steht zuerst (bis zu 40 Rezepte), danach die übrigen Arten gemischt –
+      // so bleiben die relevantesten Rezepte im Zeichenbudget.
+      const hint = slotHint(text)
+      const seen = new Set<string>(), cat: object[] = []
+      const push = (r: (typeof ctx.eligible)[number]) => { if (seen.has(r.id) || cat.length >= 80) return; seen.add(r.id); const b = ctx.base.get(r.id)!
+        cat.push({ id: r.id, name: r.name, slots: r.slots, kcal: Math.round(b.kcal), protein: Math.round(b.protein), carbs: Math.round(b.carbs), fat: Math.round(b.fat) }) }
+      if (hint) ctx.eligible.filter(r => r.slots.includes(hint)).slice(0, 40).forEach(push)
       const bySlot = new Map<string, typeof ctx.eligible>()
-      for (const r of ctx.eligible) for (const s of r.slots) bySlot.set(s, [...(bySlot.get(s) ?? []), r])
-      const seen = new Set<string>(), cat: NonNullable<unknown>[] = []
-      for (let i = 0; cat.length < 80; i++) { let added = false
-        for (const list of bySlot.values()) { const r = list[i]; if (r && !seen.has(r.id) && cat.length < 80) { seen.add(r.id); added = true
-          const b = ctx.base.get(r.id)!; cat.push({ id: r.id, name: r.name, slots: r.slots, kcal: Math.round(b.kcal), protein: Math.round(b.protein), carbs: Math.round(b.carbs), fat: Math.round(b.fat) }) } }
-        if (!added) break }
+      for (const r of ctx.eligible) for (const sl of r.slots) bySlot.set(sl, [...(bySlot.get(sl) ?? []), r])
+      for (let i = 0; cat.length < 80; i++) { let any = false; for (const list of bySlot.values()) if (list[i]) { any = true; push(list[i]) } if (!any) break }
       payload.recipe_catalog = cat
       included.push(`zulässige Rezepte (${cat.length})`)
     }
