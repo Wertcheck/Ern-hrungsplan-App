@@ -13,6 +13,7 @@
     "backend:test": "backend/.venv/bin/pytest backend/tests -q",
     "bls:test": "python -m pytest scripts/bls/test_bls_import.py -q",
     "e2e:app": "node e2e/app.cjs http://localhost:4173 /tmp/e2e/app",
+    "e2e:actions": "node e2e/actions.cjs http://localhost:4173 /tmp/e2e/act",
     "e2e:ai": "node e2e/ai.cjs http://localhost:4173 /tmp/e2e/ai"
   },
   "dependencies": {

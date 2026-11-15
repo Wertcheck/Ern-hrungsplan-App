@@ -5,7 +5,7 @@ import { useAi } from './AiProvider'
 import { validateProposal } from './actions'
 import type { ChatAction, ChatMessage } from '../domain/types'
 
-const SUGGESTIONS = ['Tausche das Mittagessen heute', 'Erkläre mein Kalorienziel', 'Welche Nährstoffe fehlen im Plan?', 'Erkläre die Ernährungsweise Keto']
+const SUGGESTIONS = ['Ich möchte heute 4.000 kcal essen', 'Tausche das Mittagessen heute', 'Welche Nährstoffe fehlen im Plan?', 'Erkläre die Ernährungsweise Keto']
 const TYPE_LABEL: Record<string, string> = { swap_meal: 'Mahlzeit austauschen', add_meal: 'Mahlzeit ergänzen', remove_meal: 'Mahlzeit entfernen', set_portion: 'Portion anpassen', create_recipe: 'Neues Rezept', exclude_food: 'Lebensmittel ausschließen', add_shopping_item: 'Zur Einkaufsliste' }
 const PROVIDER_LABEL: Record<string, string> = { openai: 'OpenAI', anthropic: 'Claude', mock: 'Test-Anbieter', local: 'Lokal' }
 
@@ -18,20 +18,22 @@ function Rich({ text }: { text: string }) {
 function ActionCard({ msg, a }: { msg: ChatMessage; a: ChatAction }) {
   const { state, ctx } = useStore()
   const ai = useAi()
-  const v = useMemo(() => (a.status === 'pending' ? validateProposal(a.proposal, state, ctx) : null), [a, state, ctx])
+  const batch = a.proposal.type === 'batch'
+  const v = useMemo(() => (a.status === 'pending' && !batch ? validateProposal(a.proposal, state, ctx) : null), [a, state, ctx, batch])
   const tone = a.status === 'applied' ? 'border-forest bg-moss/60' : a.status === 'rejected' ? 'border-danger/40 bg-danger/5' : 'border-sand bg-white/80'
   return (
     <div className={cx('rounded-2xl border p-3 mt-2 text-sm', tone)}>
       <div className="font-semibold mb-1">{v?.ok ? v.preview.title : a.summary?.title ?? TYPE_LABEL[String(a.proposal.type)] ?? 'Vorschlag'}</div>
       {a.status !== 'pending' && a.summary && <ul className="space-y-0.5 text-[13px] text-muted">{a.summary.lines.slice(0, 2).map((l, i) => <li key={i}>{l}</li>)}</ul>}
+      {batch && a.status === 'pending' && a.summary && <ul className="space-y-0.5 text-[13px]">{a.summary.lines.map((l, i) => <li key={i} className={l.startsWith('⚠') ? 'text-warn' : ''}>{l}</li>)}</ul>}
       {v?.ok && <><ul className="space-y-0.5 text-[13px]">{v.preview.lines.map((l, i) => <li key={i}>{l}</li>)}</ul>{v.preview.warnings.map(w => <div key={w} className="text-warn text-xs mt-1">⚠ {w}</div>)}</>}
       {a.status === 'pending' && v && !v.ok && <div className="text-danger text-xs">Von der Engine abgelehnt: {v.reason}</div>}
       {a.status === 'rejected' && <div className="text-danger text-xs">Abgelehnt: {a.note ?? 'Engine-Prüfung nicht bestanden'}</div>}
-      {a.status === 'applied' && <div className="text-forest-dark text-xs">✓ Übernommen (nach Prüfung durch die Ernährungs-Engine)</div>}
+      {a.status === 'applied' && <div className="text-forest-dark text-xs">✓ Übernommen (nach Prüfung durch die Ernährungs-Engine){batch ? ' · rückgängig machbar' : ''}</div>}
       {a.status === 'dismissed' && <div className="text-muted text-xs">Verworfen</div>}
-      {a.status === 'pending' && v?.ok && (
+      {a.status === 'pending' && (v?.ok || batch) && (
         <div className="flex gap-2 mt-2">
-          <Btn className="!px-4 !py-1.5 !min-h-9 text-sm" onClick={() => ai.applyAction(msg.id, a.id)}>Übernehmen</Btn>
+          <Btn className="!px-4 !py-1.5 !min-h-9 text-sm" onClick={() => ai.applyAction(msg.id, a.id)}>{batch ? 'Bestätigen' : 'Übernehmen'}</Btn>
           <Btn variant="ghost" className="!px-4 !py-1.5 !min-h-9 text-sm" onClick={() => ai.dismissAction(msg.id, a.id)}>Verwerfen</Btn>
         </div>
       )}
@@ -86,6 +88,7 @@ export function ChatPanel() {
           <h2 className="font-serif text-lg leading-tight">Ernährungsberater</h2>
           <p className="text-[11px] text-muted truncate" data-testid="ai-mode">{cloud ? `${PROVIDER_LABEL[provider ?? ''] ?? provider} · ${ai.status?.model}` : `Lokaler Berater (ohne KI) – ${ai.modeReason}`}</p>
         </div>
+        {ai.undoLabel && <button className="text-xs underline text-forest px-1" data-testid="undo-btn" title={ai.undoLabel} onClick={() => ai.undoChange()}>Rückgängig</button>}
         <button className="text-xs underline text-forest px-1" onClick={() => setShowData(true)}>Daten</button>
         <button className="text-xs underline text-forest px-1" onClick={() => { if (!state.ai.chat.length || confirm('Unterhaltung löschen?')) ai.newConversation() }}>Neu</button>
         <button className="hidden lg:block h-9 w-9 rounded-full bg-moss" aria-label="Berater schließen" onClick={() => ai.setOpen(false)}>×</button>

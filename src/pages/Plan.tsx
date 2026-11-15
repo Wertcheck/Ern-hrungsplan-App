@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../store'
 import { Btn, Card, Chip, Notice, PageTitle, Sheet, fmt, todayISO, WEEKDAYS, WEEKDAYS_LONG, dateLabel, parseISO, cx } from '../ui/kit'
-import { PERIODS, alternativesFor, dayTotals, generatePlan } from '../domain/planner'
+import { PERIODS, alternativesFor, dayTotals, generatePlan, targetFor } from '../domain/planner'
 import { macroShares, mealMacros } from '../domain/nutrition'
 import { addMeal, removeMeal, setFactor, swapMeal } from '../domain/planops'
 import { SLOT_LABEL, STYLE_LABEL, type MealSlot, type PlanDay, type PlannedMeal } from '../domain/types'
@@ -54,7 +54,8 @@ export function PlanPage() {
   const go = (d: number) => { const n = plan.days[idx + d]; if (n) setSel(n.date) }
   const totals = dayTotals(day, ctx)
   const sh = macroShares(totals)
-  const devPct = ((totals.kcal - plan.kcalTarget) / plan.kcalTarget) * 100
+  const dayTarget = targetFor(plan, day.date), oneOff = plan.dayTargets?.[day.date] !== undefined
+  const devPct = ((totals.kcal - dayTarget) / dayTarget) * 100
   const openMeal = open ? plan.days.find(d => d.date === open.date)?.meals.find(m => m.id === open.id) : null
   const swapMealObj = swap ? plan.days.find(d => d.date === swap.date)?.meals.find(m => m.id === swap.id) : null
 
@@ -121,7 +122,7 @@ export function PlanPage() {
               <Card>
                 <p className="text-sm text-muted">Kalorien gesamt</p>
                 <p className="font-serif text-4xl text-forest-dark" data-testid="day-kcal">≈ {fmt(totals.kcal)} <span className="text-base font-sans text-muted">kcal</span></p>
-                <p className={cx('text-sm', Math.abs(devPct) > 5 ? 'text-warn' : 'text-muted')}>{devPct >= 0 ? '+' : ''}{fmt(devPct, 1)} % zum Ziel ({fmt(plan.kcalTarget)})</p>
+                <p className={cx('text-sm', Math.abs(devPct) > 5 ? 'text-warn' : 'text-muted')}>{devPct >= 0 ? '+' : ''}{fmt(devPct, 1)} % zum {oneOff ? 'Tagesziel (einmalig)' : 'Ziel'} ({fmt(dayTarget)}){oneOff ? ` · dauerhaftes Ziel ${fmt(plan.kcalTarget)}` : ''}</p>
                 <div className="mt-3 space-y-1 text-sm">
                   <div className="flex justify-between"><span>Eiweiß</span><span>{fmt(totals.protein)} g (≈ {fmt(sh.protein)} %)</span></div>
                   <div className="flex justify-between"><span>Kohlenhydrate</span><span>{fmt(totals.carbs)} g (≈ {fmt(sh.carbs)} %)</span></div>
@@ -148,8 +149,8 @@ export function PlanPage() {
         </>
       )}
 
-      {view === 'woche' && <WeekView days={plan.days} sel={day.date} onPick={d => { setSel(d); setView('tag') }} target={plan.kcalTarget} />}
-      {view === 'monat' && <MonthView days={plan.days} target={plan.kcalTarget} onPick={d => { setSel(d); setView('tag') }} />}
+      {view === 'woche' && <WeekView days={plan.days} sel={day.date} onPick={d => { setSel(d); setView('tag') }} target={d => targetFor(plan, d)} />}
+      {view === 'monat' && <MonthView days={plan.days} target={d => targetFor(plan, d)} onPick={d => { setSel(d); setView('tag') }} />}
 
       {open && openMeal && ctx.recipes.get(openMeal.recipeId) && (
         <Sheet title={ctx.recipes.get(openMeal.recipeId)!.name} onClose={() => setOpen(null)}>
@@ -208,7 +209,7 @@ function AddSheet({ day, onClose, onAdd }: { day: PlanDay; onClose: () => void; 
   )
 }
 
-function WeekView({ days, sel, onPick, target }: { days: PlanDay[]; sel: string; onPick: (d: string) => void; target: number }) {
+function WeekView({ days, sel, onPick, target }: { days: PlanDay[]; sel: string; onPick: (d: string) => void; target: (date: string) => number }) {
   const { ctx } = useStore()
   const i = Math.max(0, days.findIndex(d => d.date === sel))
   const [wk, setWk] = useState(Math.floor(i / 7))
@@ -223,7 +224,7 @@ function WeekView({ days, sel, onPick, target }: { days: PlanDay[]; sel: string;
       </div>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
         {slice.map(d => {
-          const t = dayTotals(d, ctx), dev = ((t.kcal - target) / target) * 100
+          const t = dayTotals(d, ctx), dev = ((t.kcal - target(d.date)) / target(d.date)) * 100
           return (
             <Card key={d.date} onClick={() => onPick(d.date)} className="!p-3">
               <div className="flex justify-between"><b>{WEEKDAYS[parseISO(d.date).getDay()]}, {dateLabel(d.date)}</b><span className={cx('text-sm', Math.abs(dev) > 5 ? 'text-warn' : 'text-muted')}>{fmt(t.kcal)} kcal ({dev >= 0 ? '+' : ''}{fmt(dev, 1)} %)</span></div>
@@ -236,7 +237,7 @@ function WeekView({ days, sel, onPick, target }: { days: PlanDay[]; sel: string;
   )
 }
 
-function MonthView({ days, target, onPick }: { days: PlanDay[]; target: number; onPick: (d: string) => void }) {
+function MonthView({ days, target, onPick }: { days: PlanDay[]; target: (date: string) => number; onPick: (d: string) => void }) {
   const { ctx } = useStore()
   const lead = (parseISO(days[0].date).getDay() + 6) % 7
   const cells: (PlanDay | null)[] = [...Array(lead).fill(null), ...days]
@@ -246,7 +247,7 @@ function MonthView({ days, target, onPick }: { days: PlanDay[]; target: number; 
       <div className="grid grid-cols-7 gap-1.5">
         {cells.map((d, i) => {
           if (!d) return <div key={i} />
-          const t = dayTotals(d, ctx), dev = Math.abs(((t.kcal - target) / target) * 100)
+          const t = dayTotals(d, ctx), dev = Math.abs(((t.kcal - target(d.date)) / target(d.date)) * 100)
           return (
             <button key={d.date} onClick={() => onPick(d.date)} aria-label={`${dateLabel(d.date)}, ${fmt(t.kcal)} kcal`}
               className={cx('rounded-xl border p-1.5 text-left min-h-16 hover:border-forest', dev > 10 ? 'bg-danger/10 border-danger/40' : dev > 5 ? 'bg-[#fbeedd] border-warn/40' : 'bg-paper border-sand')}>

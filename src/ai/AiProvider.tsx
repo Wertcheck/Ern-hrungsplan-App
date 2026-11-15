@@ -7,6 +7,9 @@ import { localAnswer } from './local'
 import type { AiStatus, Proposal } from './types'
 import type { ChatAction, ChatMessage } from '../domain/types'
 import { buildContext } from '../domain/planner'
+import { commit as engineCommit, evaluateBatch, undo as engineUndo } from './engine'
+import { followUp, parseCommands, type NluResult, type Pending } from './nlu'
+import { lastUndoable } from '../domain/changelog'
 
 const MAX_CHAT = 60
 const HISTORY_SENT = 12
@@ -25,6 +28,8 @@ export interface AiApi {
   newConversation: () => void; clearAll: () => void
   applyAction: (msgId: string, actionId: string) => void; dismissAction: (msgId: string, actionId: string) => void
   previewContext: (text: string) => BuiltContext
+  /** letzte rückgängig machbare Änderung (Beschriftung) oder null */
+  undoLabel: string | null; undoChange: () => void
   lastContext: BuiltContext | null
 }
 const Ctx = createContext<AiApi | null>(null)
@@ -40,6 +45,7 @@ export function AiProvider({ children, client }: { children: ReactNode; client?:
   const [draft, setDraft] = useState<Draft | null>(null)
   const [lastContext, setLast] = useState<BuiltContext | null>(null)
   const abort = useRef<AbortController | null>(null)
+  const pendingNlu = useRef<Pending | null>(null)
   const stateRef = useRef(state); stateRef.current = state
 
   const refreshStatus = useCallback(async () => {
@@ -75,10 +81,49 @@ export function AiProvider({ children, client }: { children: ReactNode; client?:
     commit({ id: uid(), role: 'assistant', content: (note ? `${note}\n\n` : '') + a.text, ts: new Date().toISOString(), provider: 'local', model: 'Lokaler Berater (ohne KI)', actions: a.proposals.length ? toActions(a.proposals) : undefined })
   }, [analysis, target, commit, toActions])
 
+
+  /** Tier 0: deterministische Regel-Erkennung (kein Netz, keine KI). Liefert true, wenn die Nachricht damit vollständig behandelt wurde. */
+  const handleRules = useCallback((text: string): boolean => {
+    const st = stateRef.current, today = todayISO(), input = { state: st, today }
+    const say = (content: string, actions?: ChatAction[]) => commit({ id: uid(), role: 'assistant', content, ts: new Date().toISOString(), provider: 'local', model: 'Regel-Erkennung (lokal, ohne KI)', actions })
+    let r: NluResult | null = null
+    if (pendingNlu.current) { const f = followUp(pendingNlu.current, text, input); pendingNlu.current = null; if (f.kind !== 'none') r = f }
+    r ??= parseCommands(text, input)
+    const mkAction = (label: string, cmds: unknown[]): ChatAction => {
+      const b = evaluateBatch(cmds, st, today)
+      if (!b.ok) { const bad = b.items.find(i => !i.ev.ok)!.ev as { reason: string }; return { id: uid(), proposal: { type: 'batch', actions: cmds }, status: 'rejected', note: bad.reason, summary: { title: label, lines: [] } } }
+      const ok = b.items.map(i => (i.ev as { preview: { title: string; lines: string[]; warnings: string[] } }).preview)
+      return { id: uid(), proposal: { type: 'batch', actions: cmds, cls: b.cls, ...(label ? { choice: true } : {}) }, status: 'pending', summary: { title: label || ok.map(o => o.title).join(' + '), lines: [...ok.flatMap(o => o.lines), ...ok.flatMap(o => o.warnings.map(w => `⚠ ${w}`))] } }
+    }
+    switch (r.kind) {
+      case 'none': return false
+      case 'undo': { const l = lastUndoable(st); if (!l) { say('Es gibt nichts rückgängig zu machen.'); return true } const u = engineUndo(st); if (u) update(() => u.state); say(`Rückgängig gemacht: ${l.label}`); return true }
+      case 'refuse': say(r.text); return true
+      case 'clarify': {
+        if (r.pending) pendingNlu.current = r.pending
+        const acts = r.options.map(o => mkAction(o.label, o.commands)).filter(a => a.status === 'pending')
+        say([r.question, ...r.notes].join('\n'), acts.length ? acts : undefined); return true
+      }
+      case 'commands': {
+        const b = evaluateBatch(r.commands, st, today)
+        if (!b.ok) { const bad = b.items.filter(i => !i.ev.ok).map(i => (i.ev as { reason: string }).reason); say(`Das kann ich so nicht umsetzen: ${bad.join(' ')}\nNichts wurde geändert.`); return true }
+        if (b.cls === 'A') {
+          const c = engineCommit(r.commands, st, 'user', today)
+          if (!c.ok) { say(`Das kann ich so nicht umsetzen: ${c.reason}`); return true }
+          update(() => c.state)
+          const pv = b.items.map(i => (i.ev as { preview: { lines: string[] } }).preview.lines).flat()
+          say(`✓ Erledigt: ${c.label}\n${pv.slice(0, 4).map(l => `• ${l}`).join('\n')}${r.notes.length ? `\n${r.notes.join('\n')}` : ''}\nMit „Rückgängig“ kannst du die Änderung zurücknehmen.`)
+        } else say(`Bitte prüfen und bestätigen – ich ändere erst nach deiner Bestätigung.${r.notes.length ? `\n${r.notes.join('\n')}` : ''}`, [mkAction('', r.commands)])
+        return true
+      }
+    }
+  }, [commit, update])
+
   const send = useCallback(async (raw: string) => {
     const text = raw.trim().slice(0, 4000)
     if (!text || busy) return
     commit({ id: uid(), role: 'user', content: text, ts: new Date().toISOString() })
+    if (handleRules(text)) return
     if (mode === 'local') { answerLocally(text); return }
     const built = buildAiContext(stateRef.current, ctx, text, todayISO(), target)
     setLast(built)
@@ -107,7 +152,7 @@ export function AiProvider({ children, client }: { children: ReactNode; client?:
       actions: pending ? toActions((pending as { proposals: Proposal[] }).proposals, (pending as { rejected: { type: string; reason: string }[] }).rejected) : undefined })
     // Ohne KI-Antwort (Offline/Backend aus/Fehler): lokaler Berater antwortet, damit die Unterhaltung nicht ins Leere läuft
     if (!hadText && errMsg && errMsg !== 'Abgebrochen.') answerLocally(text, 'Die KI war nicht verfügbar – hier die Antwort des lokalen Beraters:')
-  }, [busy, mode, ctx, target, cl, commit, answerLocally, toActions, refreshStatus])
+  }, [busy, mode, ctx, target, cl, commit, handleRules, answerLocally, toActions, refreshStatus])
 
   const stop = useCallback(() => abort.current?.abort(), [])
   const newConversation = useCallback(() => update(s => ({ ...s, ai: { ...s.ai, chat: [] } })), [update])
@@ -119,6 +164,13 @@ export function AiProvider({ children, client }: { children: ReactNode; client?:
   const applyAction = useCallback((msgId: string, actionId: string) => update(s => {
     const a = s.ai.chat.find(m => m.id === msgId)?.actions?.find(x => x.id === actionId)
     if (!a || a.status !== 'pending') return s
+    if (a.proposal.type === 'batch') {
+      const c = engineCommit((a.proposal as { actions: unknown[] }).actions, s, 'user', todayISO())
+      if (!c.ok) return setActionState(msgId, actionId, 'rejected', c.reason)(s)
+      const next = setActionState(msgId, actionId, 'applied')(c.state)
+      // Auswahl-Chips derselben Rückfrage sind nach der Wahl überholt
+      return { ...next, ai: { ...next.ai, chat: next.ai.chat.map(m => (m.id !== msgId ? m : { ...m, actions: m.actions?.map(x => (x.id !== actionId && x.status === 'pending' && (x.proposal as { choice?: boolean }).choice ? { ...x, status: 'dismissed' as const, note: 'andere Option gewählt' } : x)) })) } }
+    }
     const r = confirmProposal(a.proposal, s)          // Engine validiert erneut gegen den aktuellen Zustand
     if (!r.ok) return setActionState(msgId, actionId, 'rejected', r.reason)(s)
     // Weitere Alternativen für dieselbe Mahlzeit aus derselben Nachricht sind nach der Wahl überholt
@@ -128,6 +180,8 @@ export function AiProvider({ children, client }: { children: ReactNode; client?:
   }), [update])
   const dismissAction = useCallback((msgId: string, actionId: string) => update(setActionState(msgId, actionId, 'dismissed')), [update])
 
-  const api: AiApi = { client: cl, open, setOpen, status, statusError, refreshStatus, mode, modeReason, busy, draft, send, stop, newConversation, clearAll, applyAction, dismissAction, previewContext, lastContext }
+  const undoLabel = lastUndoable(state)?.label ?? null
+  const undoChange = useCallback(() => update(s => engineUndo(s)?.state ?? s), [update])
+  const api: AiApi = { undoLabel, undoChange, client: cl, open, setOpen, status, statusError, refreshStatus, mode, modeReason, busy, draft, send, stop, newConversation, clearAll, applyAction, dismissAction, previewContext, lastContext }
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>
 }
