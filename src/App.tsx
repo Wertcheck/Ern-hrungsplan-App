@@ -9,6 +9,8 @@ import { RecipesPage } from './pages/Recipes'
 import { ShoppingPage } from './pages/Shopping'
 import { ProgressPage } from './pages/Progress'
 import { SettingsPage } from './pages/Settings'
+import { useAi } from './ai/AiProvider'
+import { ChatPanel } from './ai/ChatPanel'
 
 const NAV: { id: string; label: string; icon: string }[] = [
   { id: 'uebersicht', label: 'Übersicht', icon: '🏠' },
@@ -25,7 +27,8 @@ const SHORT: Record<string, string> = { uebersicht: 'Übersicht', plan: 'Plan', 
 const readHash = () => (location.hash.replace('#/', '') || 'uebersicht')
 
 export default function App() {
-  const { state } = useStore()
+  const { state, warnings, dismissWarnings } = useStore()
+  const ai = useAi()
   const [page, setPage] = useState(readHash())
   useEffect(() => { const h = () => { setPage(readHash()); window.scrollTo(0, 0) }; window.addEventListener('hashchange', h); return () => window.removeEventListener('hashchange', h) }, [])
   const go = (p: string) => { location.hash = `#/${p}` }
@@ -50,7 +53,22 @@ export default function App() {
             className={cx('text-left rounded-2xl px-4 py-2.5 transition', page === n.id ? 'bg-forest text-white' : 'hover:bg-moss/60')}>{n.icon} {n.label}</button>
         ))}
       </aside>
-      <main className="flex-1 min-w-0 overflow-x-clip px-4 sm:px-8 pt-6 pb-28 lg:pb-10 max-w-5xl mx-auto w-full">{body}</main>
+      <main className="flex-1 min-w-0 overflow-x-clip px-4 sm:px-8 pt-6 pb-28 lg:pb-10 max-w-5xl mx-auto w-full">
+        {warnings.length > 0 && (
+          <div role="alert" className="mb-4 rounded-2xl border border-warn/40 bg-[#fbeedd] text-warn px-4 py-3 text-sm flex gap-3 justify-between">
+            <div>{warnings.map(w => <p key={w}>{w}</p>)}</div>
+            <button className="underline shrink-0" onClick={dismissWarnings}>OK</button>
+          </div>
+        )}
+        {body}
+      </main>
+      {ai.open && (
+        <aside aria-label="Berater" className="fixed inset-0 z-50 lg:z-auto lg:sticky lg:inset-auto lg:top-0 lg:h-screen lg:w-[400px] lg:shrink-0 border-l border-sand/70 bg-cream"><ChatPanel /></aside>
+      )}
+      {!ai.open && (
+        <button onClick={() => ai.setOpen(true)} aria-label="Ernährungsberater öffnen"
+          className="fixed z-40 right-4 bottom-20 lg:bottom-6 h-14 w-14 rounded-full bg-forest text-white shadow-lg text-2xl grid place-items-center hover:bg-forest-dark">💬</button>
+      )}
       <nav aria-label="Hauptnavigation" className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-paper/95 backdrop-blur border-t border-sand safe-b">
         <ul className="grid grid-cols-5">
           {MOBILE.map(id => {

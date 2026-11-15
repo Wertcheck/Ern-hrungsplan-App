@@ -4,6 +4,7 @@ import { parseJsonText } from '../domain/persistence'
 import { Btn, Card, Notice, PageTitle } from '../ui/kit'
 import { OilForm, ProfileForm, RestrictionForm, RulesForm, StyleForm } from './forms'
 import { defaultState } from '../domain/defaults'
+import { AiSettingsCard } from '../ai/AiSettings'
 
 export function SettingsPage() {
   const { state, replace, reset, update, saveError } = useStore()
@@ -43,6 +44,7 @@ export function SettingsPage() {
       <Card><h2 className="text-2xl mb-3">Allergien &amp; Unverträglichkeiten</h2><RestrictionForm /></Card>
       <Card><h2 className="text-2xl mb-3">Öle &amp; Fette</h2><OilForm /></Card>
       <Notice level="info">Änderungen gelten für neu erzeugte Pläne. Ein bestehender Plan wird auf Regelverstöße geprüft und bei Bedarf markiert – er wird nicht automatisch verändert. Zum Anwenden im Plan „Neu generieren“.</Notice>
+      <AiSettingsCard />
       <Card>
         <h2 className="text-2xl mb-1">Daten &amp; Datenschutz</h2>
         <p className="text-sm text-muted mb-3">Alle Daten liegen ausschließlich lokal in diesem Browser. Es gibt keine Konten, kein Tracking und keine Übertragung an Dritte.</p>

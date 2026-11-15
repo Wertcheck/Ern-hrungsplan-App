@@ -3,9 +3,10 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App'
 import { ErrorBoundary, StoreProvider } from './store'
+import { AiProvider } from './ai/AiProvider'
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode><ErrorBoundary><StoreProvider><App /></StoreProvider></ErrorBoundary></StrictMode>,
+  <StrictMode><ErrorBoundary><StoreProvider><AiProvider><App /></AiProvider></StoreProvider></ErrorBoundary></StrictMode>,
 )
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
