@@ -64,7 +64,7 @@ export function parseState(raw: unknown, mode: 'load' | 'import'): ParseOutcome 
   if (typeof raw.onboarded !== 'boolean') return { ok: false, error: 'Datei ist unvollständig (onboarded fehlt).' }
   if (mode === 'import' && ver === 2) {
     // Aktuelle Sicherungsdateien müssen vollständig sein – nur ältere (v1) Dateien dürfen nachgerüstet werden.
-    const missing = Object.keys(SECTION_SCHEMAS).filter(k => raw[k] === undefined)
+    const missing = Object.keys(SECTION_SCHEMAS).filter(k => k !== 'changeLog' && raw[k] === undefined)
     if (missing.length) return { ok: false, error: `Datei ist unvollständig (fehlend: ${missing.join(', ')}).` }
   }
   const m = migrate(raw)
@@ -72,11 +72,11 @@ export function parseState(raw: unknown, mode: 'load' | 'import'): ParseOutcome 
   const warnings: string[] = []
   const state: Record<string, unknown> = { version: 2, dataVersion: BUILTIN_DATA_VERSION, onboarded: raw.onboarded }
   const fallbacks: Record<string, unknown> = {
-    profile: defaultProfile(), prefs: defaultPrefs(), foods: d.foods, recipes: d.recipes, plan: null, shopping: d.shopping, weights: [], eaten: {}, ai: defaultAi(),
+    profile: defaultProfile(), prefs: defaultPrefs(), foods: d.foods, recipes: d.recipes, plan: null, shopping: d.shopping, weights: [], eaten: {}, ai: defaultAi(), changeLog: [],
   }
-  const label: Record<string, string> = { profile: 'Profil', prefs: 'Ernährungseinstellungen', foods: 'Lebensmittel', recipes: 'Rezepte', plan: 'Ernährungsplan', shopping: 'Einkaufsliste', weights: 'Gewichtsverlauf', eaten: 'Fortschritt', ai: 'KI-Daten' }
+  const label: Record<string, string> = { profile: 'Profil', prefs: 'Ernährungseinstellungen', foods: 'Lebensmittel', recipes: 'Rezepte', plan: 'Ernährungsplan', shopping: 'Einkaufsliste', weights: 'Gewichtsverlauf', eaten: 'Fortschritt', ai: 'KI-Daten', changeLog: 'Änderungsprotokoll' }
   for (const [key, schema] of Object.entries(SECTION_SCHEMAS)) {
-    const value = key === 'profile' ? { ...defaultProfile(), ...(isObj(m.profile) ? m.profile : {}) } : m[key]
+    const value = key === 'profile' ? { ...defaultProfile(), ...(isObj(m.profile) ? m.profile : {}) } : key === 'changeLog' ? m.changeLog ?? [] : m[key]
     const r = value === undefined ? { success: false as const, error: { issues: [{ message: 'fehlt' }] } } : schema.safeParse(value)
     if (r.success) state[key] = r.data
     else if (mode === 'import') return { ok: false, error: `Abschnitt „${label[key]}“ ist ungültig oder unvollständig (${r.error.issues[0]?.message ?? 'Fehler'}).` }

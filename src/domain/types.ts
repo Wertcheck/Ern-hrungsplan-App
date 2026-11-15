@@ -140,6 +140,9 @@ export type Sex = 'f' | 'm' | 'd'
 export type Activity = 'sitzend' | 'leicht' | 'moderat' | 'hoch'
 export type Goal = 'halten' | 'reduzieren' | 'aufbauen' | 'ausgewogen'
 
+/** Eigene Makroziele in Gramm pro Tag (optional; fehlende Werte folgen der Ernährungsweise) */
+export interface MacroGoals { proteinG?: number; carbsG?: number; fatG?: number }
+
 export interface Profile {
   age: number
   heightCm: number
@@ -152,6 +155,7 @@ export interface Profile {
   kcalManual: number
   mealCount: 3 | 4 | 5
   persons: number
+  macroGoals?: MacroGoals
 }
 
 export type Severity = 'allergy' | 'intolerance'
@@ -197,6 +201,10 @@ export interface Plan {
   days: PlanDay[]
   oils: { warm: string | null; cold: string | null }
   kcalTarget: number
+  /** Einmalige Tagesziele (Datum → kcal); überschreiben nie das dauerhafte Ziel */
+  dayTargets?: Record<string, number>
+  /** Energieanteile (Prozent), aus Profil-Makrozielen/Weisen bei der Erzeugung berechnet */
+  macroShare?: { protein: number; carbs: number; fat: number }
   persons: number
 }
 
@@ -205,6 +213,15 @@ export interface ShoppingState {
   removed: string[]
   manual: { id: string; name: string; amount: string; checked: boolean }[]
 }
+
+/** Umkehrbare Änderung am Zustand (nur die betroffenen Teile werden gespeichert). */
+export interface ChangePatch {
+  /** Abschnitt des AppState */
+  key: 'profile' | 'prefs' | 'shopping' | 'weights' | 'eaten' | 'plan' | 'recipes' | 'foods'
+  /** Vorher-Wert des Abschnitts (bei plan/recipes/foods nur die geänderten Teile, siehe changelog.ts) */
+  before: unknown
+}
+export interface ChangeEntry { id: string; ts: string; label: string; source: 'user' | 'assistant'; patches: ChangePatch[]; undone?: boolean }
 
 export interface AiShare { body: boolean; plan: boolean; shopping: boolean; progress: boolean; foodPrefs: boolean }
 export type ActionStatus = 'pending' | 'applied' | 'dismissed' | 'rejected'
@@ -226,4 +243,6 @@ export interface AppState {
   weights: { date: string; kg: number }[]
   eaten: Record<string, boolean>
   ai: AiState
+  /** Änderungsprotokoll mit Undo (jüngste zuletzt, max. 25) */
+  changeLog: ChangeEntry[]
 }

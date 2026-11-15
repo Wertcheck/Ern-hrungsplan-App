@@ -16,6 +16,7 @@ export const profileSchema = z.object({
   kcalManual: num(1200, 4500),
   mealCount: z.union([z.literal(3), z.literal(4), z.literal(5)]),
   persons: z.number().int().min(1).max(10),
+  macroGoals: z.object({ proteinG: num(0, 1000).optional(), carbsG: num(0, 2000).optional(), fatG: num(0, 1000).optional() }).optional(),
 })
 
 export const foodInputSchema = z.object({
@@ -70,6 +71,8 @@ export const planSchema = z.object({
   })).max(60),
   oils: z.object({ warm: z.string().nullable(), cold: z.string().nullable() }),
   kcalTarget: num(500, 8000), persons: z.number().int().min(1).max(10),
+  dayTargets: z.record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), num(500, 8000)).optional(),
+  macroShare: z.object({ protein: num(0, 100), carbs: num(0, 100), fat: num(0, 100) }).optional(),
 })
 
 export const shoppingSchema = z.object({
@@ -87,11 +90,16 @@ export const aiSchema = z.object({
   })).max(300),
 })
 
+export const changeLogSchema = z.array(z.object({
+  id: str(80), ts: str(60), label: str(200), source: z.enum(['user', 'assistant']), undone: z.boolean().optional(),
+  patches: z.array(z.object({ key: z.enum(['profile', 'prefs', 'shopping', 'weights', 'eaten', 'plan', 'recipes', 'foods']), before: z.unknown() })).max(8),
+})).max(25)
+
 export const weightsSchema = z.array(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), kg: num(30, 300) })).max(5000)
 export const eatenSchema = z.record(z.string(), z.boolean())
 
 /** Abschnitte des Zustands; jeder wird einzeln validiert (siehe persistence.ts). */
 export const SECTION_SCHEMAS = {
   profile: profileSchema, prefs: prefsSchema, foods: z.array(foodSchema).max(5000), recipes: z.array(recipeSchema).max(5000),
-  plan: planSchema.nullable(), shopping: shoppingSchema, weights: weightsSchema, eaten: eatenSchema, ai: aiSchema,
+  plan: planSchema.nullable(), shopping: shoppingSchema, weights: weightsSchema, eaten: eatenSchema, ai: aiSchema, changeLog: changeLogSchema,
 } as const

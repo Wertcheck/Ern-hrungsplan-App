@@ -3,6 +3,8 @@ import { SLOT_LABEL } from './types'
 import { addMacros, kcalTarget, macroShares, mealMacros, recipeMacros, ZERO, type Macros, type OilChoice } from './nutrition'
 import { chooseOils, fitWeight, macroTarget, recipeViolation, softStyles, styleFit } from './rules'
 import { FACTOR_MAX, FACTOR_MIN, PREF_MAX, PREF_MIN, maxPlausibleFactor } from './plausibility'
+import type { MacroGoals } from './types'
+import type { MacroShare } from './diets'
 
 export { FACTOR_MAX, FACTOR_MIN, PREF_MAX, PREF_MIN }
 
@@ -184,7 +186,7 @@ function fineTune(meals: PlannedMeal[], target: number, ctx: PlanContext) {
   }
 }
 
-function pickCandidates(slot: MealSlot, slotTarget: number, ctx: PlanContext, env: ScoreEnv, used: Set<string>, rand: () => number): Cand[] {
+function pickCandidates(slot: MealSlot, slotTarget: number, ctx: PlanContext, env: ScoreEnv, used: Set<string>, rand: () => number, focus?: MacroShare): Cand[] {
   const all: Cand[] = []
   for (const r of ctx.eligible) {
     if (!r.slots.includes(slot) || used.has(r.id)) continue
@@ -195,25 +197,28 @@ function pickCandidates(slot: MealSlot, slotTarget: number, ctx: PlanContext, en
   }
   const byScore = [...all].sort((a, b) => b.score - a.score).slice(0, TOP_BY_SCORE)
   const rest = all.filter(c => !byScore.includes(c)).sort((a, b) => Math.abs(a.b - slotTarget) - Math.abs(b.b - slotTarget)).slice(0, TOP_BY_KCAL)
-  return [...byScore, ...rest]
+  // Bei ausdrücklich gesetzten Makrozielen: zusätzlich die Rezepte, deren Energieverteilung dem Ziel am nächsten kommt
+  const near = focus
+    ? all.filter(c => !byScore.includes(c) && !rest.includes(c)).map(c => { const sh = macroShares(c.m); return { c, d: Math.abs(sh.protein - focus.protein) + Math.abs(sh.carbs - focus.carbs) + Math.abs(sh.fat - focus.fat) } }).sort((a, b) => a.d - b.d).slice(0, 3).map(x => x.c)
+    : []
+  return [...byScore, ...rest, ...near]
 }
 
 /** Wählt für einen Tag die beste Kombination aus Kandidaten und berechnet die Portionen. */
-function solveDay(slots: { slot: MealSlot; share: number }[], T: number, ctx: PlanContext, env: ScoreEnv, rand: () => number): PlannedMeal[] {
+function solveDay(slots: { slot: MealSlot; share: number }[], T: number, ctx: PlanContext, env: ScoreEnv, rand: () => number, tgt: MacroShare, custom = false): PlannedMeal[] {
   const used = new Set<string>()
-  const pools = slots.map(({ slot, share }) => pickCandidates(slot, T * share, ctx, env, used, rand))
+  const pools = slots.map(({ slot, share }) => pickCandidates(slot, T * share, ctx, env, used, rand, custom ? tgt : undefined))
   if (pools.some(p => p.length === 0)) {
     // Unvollständig lösbar: Slots ohne Kandidaten werden übersprungen, Rest wird einzeln gelöst.
     const ok = pools.map((p, i) => ({ p, i })).filter(x => x.p.length)
     if (!ok.length) return []
-    return solveSubset(ok.map(x => slots[x.i]), ok.map(x => x.p), T, ctx)
+    return solveSubset(ok.map(x => slots[x.i]), ok.map(x => x.p), T, ctx, tgt, custom)
   }
-  return solveSubset(slots, pools, T, ctx)
+  return solveSubset(slots, pools, T, ctx, tgt, custom)
 }
 
-function solveSubset(slots: { slot: MealSlot; share: number }[], pools: Cand[][], T: number, ctx: PlanContext): PlannedMeal[] {
+function solveSubset(slots: { slot: MealSlot; share: number }[], pools: Cand[][], T: number, ctx: PlanContext, tgt: MacroShare, custom = false): PlannedMeal[] {
   const n = pools.length
-  const tgt = macroTarget(ctx.prefs.styles)
   const idx = new Array<number>(n).fill(0)
   const holder: { best: { obj: number; pick: Cand[]; f: number[] } | null } = { best: null }
   const lo = new Array<number>(n), hi = new Array<number>(n), b = new Array<number>(n)
@@ -233,7 +238,7 @@ function solveSubset(slots: { slot: MealSlot; share: number }[], pools: Cand[][]
       const dev = Math.abs(total - T) / T
       const e = P * 4 + C * 4 + Fa * 9
       const macroDev = e > 0 ? (Math.abs((P * 400) / e - tgt.protein) + Math.abs((C * 400) / e - tgt.carbs) + Math.abs((Fa * 900) / e - tgt.fat)) / 100 : 1
-      const obj = sc - pen - 60 * dev - 2.0 * macroDev - (flexi && meat > 1 ? 1.5 * (meat - 1) : 0)
+      const obj = sc - pen - 60 * dev - (custom ? 14 : 2.0) * macroDev - (flexi && meat > 1 ? 1.5 * (meat - 1) : 0)
       if (!holder.best || obj > holder.best.obj) holder.best = { obj, pick: [...pick], f }
       return
     }
@@ -250,38 +255,110 @@ function solveSubset(slots: { slot: MealSlot; share: number }[], pools: Cand[][]
   return meals
 }
 
-export function generatePlan(input: GenerateInput): Plan {
+/** Tagesziel eines Datums: einmaliges Tagesziel, sonst das dauerhafte Planziel. */
+export const targetFor = (plan: Pick<Plan, 'kcalTarget' | 'dayTargets'>, date: string): number => plan.dayTargets?.[date] ?? plan.kcalTarget
+
+/**
+ * Energieanteile aus eigenen Makrozielen (Gramm) – fehlende Anteile folgen proportional der Ernährungsweise.
+ * Ohne Makroziele: undefined (es gilt das Ziel der Ernährungsweise).
+ */
+export function effectiveMacroShare(goals: MacroGoals | undefined, styles: string[], kcal: number): MacroShare | undefined {
+  if (!goals || (goals.proteinG === undefined && goals.carbsG === undefined && goals.fatG === undefined) || kcal <= 0) return undefined
+  const base = macroTarget(styles)
+  const set: Partial<MacroShare> = {}
+  if (goals.proteinG !== undefined) set.protein = (goals.proteinG * 4 * 100) / kcal
+  if (goals.carbsG !== undefined) set.carbs = (goals.carbsG * 4 * 100) / kcal
+  if (goals.fatG !== undefined) set.fat = (goals.fatG * 9 * 100) / kcal
+  const fixed = Object.values(set).reduce((a, b) => a + b, 0)
+  const missing = (['protein', 'carbs', 'fat'] as const).filter(k => set[k] === undefined)
+  const rest = Math.max(0, 100 - fixed), baseSum = missing.reduce((a, k) => a + base[k], 0) || 1
+  const out = { ...base, ...set } as MacroShare
+  for (const k of missing) out[k] = (rest * base[k]) / baseSum
+  const sum = out.protein + out.carbs + out.fat
+  return { protein: (out.protein * 100) / sum, carbs: (out.carbs * 100) / sum, fat: (out.fat * 100) / sum }
+}
+
+interface Hist { recent: Map<string, number>; counts: Map<string, number>; yesterdayKeys: Set<string>; freshByDay: Set<string>[] }
+const newHist = (): Hist => ({ recent: new Map(), counts: new Map(), yesterdayKeys: new Set(), freshByDay: [] })
+const beginDay = (h: Hist) => { for (const [k, v] of h.recent) h.recent.set(k, v + 1) }
+const envOf = (h: Hist): ScoreEnv => { const d = h.freshByDay.length; return { recent: h.recent, counts: h.counts, yesterdayKeys: h.yesterdayKeys, recentFresh: new Set([...(h.freshByDay[d - 1] ?? []), ...(h.freshByDay[d - 2] ?? [])]) } }
+function endDay(h: Hist, meals: PlannedMeal[], ctx: PlanContext) {
+  const fresh = new Set<string>()
+  h.yesterdayKeys = new Set<string>()
+  for (const m of meals) {
+    const r = ctx.recipes.get(m.recipeId)
+    if (!r) continue
+    h.recent.set(r.id, 0); h.counts.set(r.id, (h.counts.get(r.id) ?? 0) + 1)
+    h.yesterdayKeys.add(mainKey(r, ctx)); r.ingredients.forEach(i => fresh.add(i.foodId))
+  }
+  h.freshByDay.push(fresh)
+}
+
+/**
+ * Löst einen Tag. Mit `escalate` werden bei unerreichbarem Ziel schrittweise Zwischenmahlzeiten (bis 5 Mahlzeiten) ergänzt –
+ * z. B. bei einem einmaligen Tagesziel von 4.000 kcal.
+ */
+function solveWithEscalation(T: number, mealCount: 3 | 4 | 5, ctx: PlanContext, env: ScoreEnv, rand: () => number, tgt: MacroShare, escalate: boolean, custom = false): { meals: PlannedMeal[]; mealCount: 3 | 4 | 5 } {
+  const devOf = (m: PlannedMeal[]) => (m.length ? Math.abs(dayKcal(m, ctx) - T) / T : 1)
+  let best = solveDay(slotsFor(mealCount), T, ctx, env, rand, tgt, custom), used = mealCount
+  if (!escalate || devOf(best) <= TOL_OK / 100) return { meals: best, mealCount: used }
+  for (let mc = mealCount + 1; mc <= 5; mc++) {
+    const cand = solveDay(slotsFor(mc as 4 | 5), T, ctx, env, rand, tgt, custom)
+    if (devOf(cand) < devOf(best) - 1e-9) { best = cand; used = mc as 4 | 5 }
+    if (devOf(best) <= TOL_OK / 100) break
+  }
+  return { meals: best, mealCount: used }
+}
+
+export function generatePlan(input: GenerateInput & { dayTargets?: Record<string, number> }): Plan {
   const { profile, prefs } = input
   const ctx = buildContext(input.foods, input.recipes, prefs)
   const target = kcalTarget(profile)
   const rand = rng(input.seed ?? 1)
-  const slots = slotsFor(profile.mealCount)
-  const recent = new Map<string, number>()
-  const counts = new Map<string, number>()
-  let yesterdayKeys = new Set<string>()
-  const freshByDay: Set<string>[] = []
+  const macroShare = effectiveMacroShare(profile.macroGoals, prefs.styles, target)
+  const tgt = macroShare ?? macroTarget(prefs.styles)
+  const h = newHist()
   const days: PlanDay[] = []
-
   for (let d = 0; d < input.days; d++) {
-    for (const [k, v] of recent) recent.set(k, v + 1)
-    const recentFresh = new Set<string>([...(freshByDay[d - 1] ?? []), ...(freshByDay[d - 2] ?? [])])
-    const meals = solveDay(slots, target, ctx, { recent, counts, yesterdayKeys, recentFresh }, rand)
-    const fresh = new Set<string>()
-    yesterdayKeys = new Set<string>()
-    for (const m of meals) {
-      const r = ctx.recipes.get(m.recipeId)!
-      recent.set(r.id, 0)
-      counts.set(r.id, (counts.get(r.id) ?? 0) + 1)
-      yesterdayKeys.add(mainKey(r, ctx))
-      r.ingredients.forEach(i => fresh.add(i.foodId))
-    }
-    freshByDay.push(fresh)
-    days.push({ date: addDays(input.startDate, d), meals })
+    const date = addDays(input.startDate, d), T = input.dayTargets?.[date] ?? target
+    beginDay(h)
+    const { meals } = solveWithEscalation(T, profile.mealCount, ctx, envOf(h), rand, tgt, input.dayTargets?.[date] !== undefined, !!macroShare)
+    endDay(h, meals, ctx)
+    days.push({ date, meals })
   }
   return {
     id: `plan-${Date.now().toString(36)}`, createdAt: new Date().toISOString(), startDate: input.startDate,
     days, oils: ctx.oils, kcalTarget: target, persons: profile.persons,
+    ...(input.dayTargets && Object.keys(input.dayTargets).length ? { dayTargets: input.dayTargets } : {}), ...(macroShare ? { macroShare } : {}),
   }
+}
+
+export interface RegenResult { plan: Plan; notes: string[]; mealCounts: Record<string, number> }
+/**
+ * Berechnet einzelne Tage neu (mit Historie der Nachbartage für Vielfalt/Reste). Neue Tagesziele in `overrideTargets`
+ * werden als einmalige Tagesziele im Plan gespeichert; das dauerhafte Planziel bleibt unverändert.
+ */
+export function regenerateDays(plan: Plan, ctx: PlanContext, mealCount: 3 | 4 | 5, dates: string[], opts: { seed?: number; overrideTargets?: Record<string, number> } = {}): RegenResult {
+  const want = new Set(dates)
+  const dayTargets = { ...(plan.dayTargets ?? {}), ...(opts.overrideTargets ?? {}) }
+  const rand = rng(opts.seed ?? 7)
+  const tgt = plan.macroShare ?? macroTarget(ctx.prefs.styles)
+  const h = newHist(), notes: string[] = [], mealCounts: Record<string, number> = {}
+  const days: PlanDay[] = []
+  const lastIdx = Math.max(...plan.days.map((d, i) => (want.has(d.date) ? i : -1)))
+  plan.days.forEach((d, i) => {
+    if (i > lastIdx) { days.push(d); return }
+    beginDay(h)
+    if (!want.has(d.date)) { endDay(h, d.meals, ctx); days.push(d); return }
+    const T = dayTargets[d.date] ?? plan.kcalTarget
+    const r = solveWithEscalation(T, mealCount, ctx, envOf(h), rand, tgt, dayTargets[d.date] !== undefined, !!plan.macroShare)
+    endDay(h, r.meals, ctx); mealCounts[d.date] = r.mealCount
+    if (r.mealCount > mealCount) notes.push(`${d.date}: Für ${Math.round(T)} kcal wurden ${r.mealCount - mealCount} zusätzliche Zwischenmahlzeit(en) eingeplant (${r.mealCount} Mahlzeiten).`)
+    const dev = r.meals.length ? ((dayKcal(r.meals, ctx) - T) / T) * 100 : 100
+    if (Math.abs(dev) > TOL_WARN) notes.push(`${d.date}: Das Ziel von ${Math.round(T)} kcal ist mit den vorhandenen Rezepten nur auf ${Math.abs(dev).toFixed(0)} % genau erreichbar.`)
+    days.push({ date: d.date, meals: r.meals })
+  })
+  return { plan: { ...plan, days, ...(Object.keys(dayTargets).length ? { dayTargets } : {}) }, notes, mealCounts }
 }
 
 /** Alternativen für einen Slot, nach Score und Kalorienpassung sortiert (für „Mahlzeit austauschen“). */
@@ -313,13 +390,12 @@ export function dayTotals(day: PlanDay, ctx: PlanContext): Macros {
 }
 
 export function analyzePlan(plan: Plan, ctx: PlanContext, mealCount: 3 | 4 | 5 = 3): PlanAnalysis {
-  const target = plan.kcalTarget
   const issues: PlanIssue[] = []
   const days: DayTotals[] = plan.days.map(d => {
-    const macros = dayTotals(d, ctx)
+    const macros = dayTotals(d, ctx), target = targetFor(plan, d.date)
     return { date: d.date, macros, devPct: ((macros.kcal - target) / target) * 100 }
   })
-  const tgt = macroTarget(ctx.prefs.styles)
+  const tgt = plan.macroShare ?? macroTarget(ctx.prefs.styles)
   const nonEmpty = days.filter(d => d.macros.kcal > 0)
   const calScore = days.length ? days.reduce((s, d) => s + Math.max(0, 100 - 20 * Math.abs(d.devPct)), 0) / days.length : 0
   const macScore = nonEmpty.length ? nonEmpty.reduce((s, d) => {

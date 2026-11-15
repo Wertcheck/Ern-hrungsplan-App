@@ -15,5 +15,5 @@ export const defaultAi = (): AiState => ({ consent: false, share: { body: false,
 export const defaultState = (): AppState => ({
   version: 2, dataVersion: BUILTIN_DATA_VERSION, onboarded: false, profile: defaultProfile(), prefs: defaultPrefs(),
   foods: structuredClone(BUILTIN_FOODS), recipes: structuredClone(BUILTIN_RECIPES),
-  plan: null, shopping: { checked: [], removed: [], manual: [] }, weights: [], eaten: {}, ai: defaultAi(),
+  plan: null, shopping: { checked: [], removed: [], manual: [] }, weights: [], eaten: {}, ai: defaultAi(), changeLog: [],
 })
