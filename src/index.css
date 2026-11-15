@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cream: #f8f4ea;
+  --color-paper: #fffdf8;
+  --color-forest: #2f5d2a;
+  --color-forest-dark: #1f3f1c;
+  --color-olive: #6b8e3a;
+  --color-moss: #e3ead2;
+  --color-sand: #e8dfc8;
+  --color-sandtext: #8a7a55;
+  --color-ink: #1d2b1a;
+  --color-muted: #6b705f;
+  --color-warn: #b3641c;
+  --color-danger: #a13a2e;
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html, body, #root { min-height: 100%; }
+body {
+  background: radial-gradient(1200px 500px at 90% -10%, #eef2dc 0%, transparent 60%), var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+h1, h2, h3 { font-family: var(--font-serif); letter-spacing: -0.01em; }
+button, input, select, textarea { font: inherit; }
+.safe-b { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise .28s ease-out both; }
+@keyframes sheet { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.sheet { animation: sheet .22s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .rise, .sheet { animation: none; } }
+:focus-visible { outline: 2px solid var(--color-forest); outline-offset: 2px; }
