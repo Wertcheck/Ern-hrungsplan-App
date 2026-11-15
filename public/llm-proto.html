@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lokales Modell – Prototyp</title>
+<style>body{font:16px system-ui,sans-serif;margin:0;padding:16px;background:#f7f4ec;color:#1f2a1f}button,select{font:inherit;padding:12px 14px;margin:6px 6px 6px 0;border-radius:14px;border:1px solid #2f5d3a}button{background:#2f5d3a;color:#fff}button.alt{background:#fff;color:#2f5d3a}button:disabled{opacity:.5}pre{background:#fff;border:1px solid #d9d2bd;border-radius:12px;padding:10px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:45vh;overflow:auto}h1{font-size:20px}p{line-height:1.45}.n{font-size:13px;color:#555}progress{width:100%}</style></head>
+<body>
+<h1>Lokales Modell (WebGPU) – Prototyp</h1>
+<p><b>Nur ein Messversuch, nicht Teil der App.</b> Die Seite lädt beim Klick <b>einmalig ein Modell (ca. 0,7–1 GB)</b> aus dem Netz – bitte <b>nur im WLAN</b> – und führt 6 feste deutsche Testbefehle aus. Deine Eingaben und Ergebnisse verlassen das Gerät nicht (die Berechnung läuft lokal; es werden nur Modelldateien <i>heruntergeladen</i>). Quellen: Skript <code>cdn.jsdelivr.net</code> (@mlc-ai/web-llm 0.2.88), Modelldateien <code>huggingface.co</code> / <code>raw.githubusercontent.com</code>.</p>
+<p class="n">Vorher: Akku notieren, Gerät nicht im Energiesparmodus, App im Vordergrund lassen. Bei Absturz/Neuladen: Seite neu öffnen und einfach nochmal starten – ein Absturz ist ein Messergebnis (bitte kurz dazuschreiben).</p>
+<select id="model">
+ <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama-3.2-1B (kleinstes sinnvolles, ~0,9 GB)</option>
+ <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen2.5-1.5B (~1,6 GB Speicherbedarf)</option>
+ <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen2.5-0.5B (~0,9 GB, schwächer)</option>
+</select><br>
+<button id="load">1. Modell laden</button>
+<button id="run" class="alt" disabled>2. Testbefehle ausführen</button>
+<button id="copy" class="alt">Ergebnis kopieren</button>
+<button id="dl" class="alt">Als Datei speichern</button>
+<progress id="pg" value="0" max="1" hidden></progress>
+<p id="st" class="n">Bereit.</p>
+<pre id="out">Noch nichts gemessen.</pre>
+<script type="module">
+const R={schema:'ernaehrungsplan-llm-proto-v1',note:'Alle Werte auf diesem Gerät gemessen; nicht gemessen = fehlt.',time:new Date().toISOString(),runs:[]}
+const $=id=>document.getElementById(id),out=$('out'),st=$('st')
+const show=()=>{out.textContent=JSON.stringify(R,null,2)}
+const bat=async()=>{try{const b=await navigator.getBattery();return +b.level.toFixed(2)}catch(e){return null}}
+const SYSTEM=`Du bist ein Befehlserkenner für eine Ernährungsplaner-App. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt.
+Erlaubte Aktionen:
+{"type":"update_calorie_target","kcal":<Zahl>,"scope":"today"|"permanent"}
+{"type":"update_macros","protein_g":<Zahl>}
+{"type":"update_shopping_list","op":"add","name":"<Text>"}
+{"type":"clarify","question":"<Rückfrage>"}   (wenn Zeitbezug heute/dauerhaft fehlt oder etwas unklar ist)
+{"type":"none"}   (wenn es keine Änderung ist, z. B. eine Frage)
+Rate nie. Erfinde keine Werte.`
+const TESTS=[
+ ['Ich möchte heute 4.000 kcal essen.',j=>j.type==='update_calorie_target'&&+j.kcal===4000&&j.scope==='today'],
+ ['Setze mein Kalorienziel dauerhaft auf 2.800.',j=>j.type==='update_calorie_target'&&+j.kcal===2800&&j.scope==='permanent'],
+ ['Ändere mein Proteinziel auf 180 Gramm.',j=>j.type==='update_macros'&&+j.protein_g===180],
+ ['Setze Milch auf die Einkaufsliste.',j=>j.type==='update_shopping_list'&&j.op==='add'&&/milch/i.test(j.name||'')],
+ ['Ich möchte 3000 kcal essen.',j=>j.type==='clarify'],
+ ['Erkläre mir bitte Keto in einem Satz.',j=>j.type==='none']]
+let engine=null,webllm=null
+$('load').onclick=async()=>{
+ const id=$('model').value;$('load').disabled=true;$('pg').hidden=false
+ try{
+  R.preload={battery:await bat(),webgpu:!!navigator.gpu,model:id}
+  st.textContent='Bibliothek wird geladen …'
+  webllm=await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.88/+esm')
+  const t0=performance.now();let last=0
+  engine=await webllm.CreateMLCEngine(id,{initProgressCallback:p=>{$('pg').value=p.progress||0;if(performance.now()-last>400){last=performance.now();st.textContent=p.text}}})
+  R.load={ms:Math.round(performance.now()-t0),model:id,note:'Beim zweiten Laden (Cache) ist die Zeit deutlich kürzer – bitte nur den ersten Wert für „Download+Init“ nutzen.'}
+  try{const e=await navigator.storage.estimate();R.load.storageUsageMB=Math.round(e.usage/1048576)}catch(e){}
+  st.textContent='Modell geladen in '+Math.round(R.load.ms/1000)+' s.';$('run').disabled=false
+ }catch(e){R.load={error:String(e&&e.message||e),model:id};st.textContent='Fehler beim Laden (auch das ist ein Messergebnis).';$('load').disabled=false}
+ show()}
+$('run').onclick=async()=>{
+ $('run').disabled=true;R.runs=[];R.runStart={battery:await bat()}
+ for(const [text,check] of TESTS){
+  st.textContent='Test: '+text;const t0=performance.now();let ttft=null,acc='',usage=null,err=null
+  try{
+   const s=await engine.chat.completions.create({messages:[{role:'system',content:SYSTEM},{role:'user',content:text}],temperature:0,max_tokens:120,stream:true,stream_options:{include_usage:true},response_format:{type:'json_object'}})
+   for await(const c of s){const d=c.choices[0]?.delta?.content;if(d){if(ttft===null)ttft=performance.now()-t0;acc+=d}if(c.usage)usage=c.usage}
+  }catch(e){err=String(e&&e.message||e)}
+  const total=performance.now()-t0;let parsed=null,valid=false,correct=false
+  try{parsed=JSON.parse(acc);valid=true;correct=!!check(parsed)}catch(e){}
+  R.runs.push({input:text,output:acc,validJson:valid,correctAction:correct,ttft_ms:ttft===null?null:Math.round(ttft),total_ms:Math.round(total),prefill_tps:usage?.extra?.prefill_tokens_per_s??null,decode_tps:usage?.extra?.decode_tokens_per_s??null,tokens:usage?.completion_tokens??null,error:err})
+  show()}
+ R.summary={tests:R.runs.length,validJson:R.runs.filter(r=>r.validJson).length,correct:R.runs.filter(r=>r.correctAction).length,note:'Nur 6 feste Sätze: eine Stichprobe, KEINE Aussage über Genauigkeit im Alltag.'}
+ R.runEnd={battery:await bat()};st.textContent='Fertig: '+R.summary.correct+'/'+R.summary.tests+' korrekt.';$('run').disabled=false;show()}
+$('copy').onclick=()=>navigator.clipboard?.writeText(JSON.stringify(R,null,2)).then(()=>alert('Kopiert'),()=>alert('Kopieren nicht möglich – „Als Datei speichern“.'))
+$('dl').onclick=()=>{const u=URL.createObjectURL(new Blob([JSON.stringify(R,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=u;a.download='llm-proto-s23.json';a.click()}
+</script></body></html>
