@@ -1,34 +1,46 @@
-import type { Allergen, Food, Ingredient, Preferences, Recipe, Style } from './types'
-import { OIL_COLD, OIL_WARM } from './types'
-import { macroShares, recipeMacros, type OilChoice } from './nutrition'
+import type { Allergen, CustomRule, Food, FoodGroup, Ingredient, Preferences, Recipe } from './types'
+import { ALLERGEN_LABEL, GROUP_LABEL, OIL_COLD, OIL_WARM } from './types'
+import { ingredientsMacros, resolveIngredients, type Macros, type OilChoice } from './nutrition'
+import { analyzeCombination, getDiet, macroTargetFor, type DietContext } from './diets'
 
 const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
 
-export const isVegan = (p: Preferences) => p.styles.includes('vegan')
-export const isVegetarian = (p: Preferences) => p.styles.includes('vegan') || p.styles.includes('vegetarisch')
+/** Laktose, Fruktose, Histamin sind Unverträglichkeiten, keine Allergien – werden bei „Allergie“ trotzdem strikt behandelt. */
+export const INTOLERANCE_ONLY: Allergen[] = ['laktose', 'fruktose', 'histamin']
 
-/** Gibt den Grund zurück, warum ein Lebensmittel für diese Einstellungen nicht erlaubt ist, sonst null. */
+export function ruleViolation(rule: CustomRule, f: Food): string | null {
+  if (!rule.enabled) return null
+  const v = String(rule.value)
+  if (rule.kind === 'exclude_group' && f.group === v) return `${f.name} (${GROUP_LABEL[f.group as FoodGroup] ?? f.group}) – eigene Regel „${rule.name}“`
+  if (rule.kind === 'exclude_category' && f.category === v) return `${f.name} – eigene Regel „${rule.name}“`
+  if (rule.kind === 'exclude_term') { const t = norm(v.trim()); if (t && norm(f.name).includes(t)) return `${f.name} – eigene Regel „${rule.name}“` }
+  return null
+}
+
+/** Gibt den Grund zurück, warum ein Lebensmittel nicht erlaubt ist, sonst null. Allergien haben stets Vorrang. */
 export function foodViolation(food: Food, prefs: Preferences): string | null {
+  for (const r of prefs.restrictions) {
+    const label = ALLERGEN_LABEL[r.allergen]
+    if (r.severity === 'allergy') {
+      if (!food.allergenInfoKnown) return `${food.name}: Allergeninformation unbekannt (Sicherheitsausschluss wegen Allergie „${label}“)`
+      if (food.allergens.includes(r.allergen)) return `${food.name} enthält ${label} (Allergie)`
+      if (prefs.strictTraces && (food.traces ?? []).includes(r.allergen)) return `${food.name}: mögliche Spuren (${label}) – Allergie, strenge Spurenregel`
+    } else if (food.allergens.includes(r.allergen)) return `${food.name} enthält ${label} (Unverträglichkeit)`
+  }
   if (prefs.excludedFoods.includes(food.id)) return `${food.name} ist ausgeschlossen`
   const nm = norm(food.name)
   for (const term of prefs.customExclusions) {
     const t = norm(term.trim())
     if (t && nm.includes(t)) return `${food.name} entspricht dem Ausschluss „${term}“`
   }
-  for (const r of prefs.restrictions) {
-    if (r.severity === 'allergy' && !food.allergenInfoKnown)
-      return `${food.name}: Allergeninformation unbekannt (Sicherheitsausschluss wegen Allergie)`
-    if (food.allergens.includes(r.allergen))
-      return `${food.name} enthält ${r.allergen} (${r.severity === 'allergy' ? 'Allergie' : 'Unverträglichkeit'})`
-  }
-  if (isVegan(prefs) && food.animal !== 'none') return `${food.name} ist nicht vegan`
-  if (isVegetarian(prefs) && (food.animal === 'meat' || food.animal === 'fish')) return `${food.name} ist nicht vegetarisch`
+  for (const r of prefs.customRules) { const v = ruleViolation(r, food); if (v) return v }
+  for (const s of prefs.styles) { const v = getDiet(s)?.foodRule?.(food); if (v) return v }
   return null
 }
 
 export function isPlaceholder(id: string) { return id === OIL_WARM || id === OIL_COLD }
 
-/** Wählt das Öl für warme und kalte Zubereitung entsprechend Vorlieben, Ausschlüssen und Eignung. */
+/** Wählt das Öl für warme und kalte Zubereitung entsprechend Vorlieben, Ausschlüssen, Ernährungsweisen und Allergien. */
 export function chooseOils(foods: Food[], prefs: Preferences): { oils: OilChoice; notes: string[] } {
   const o = prefs.oils
   const notes: string[] = []
@@ -50,8 +62,19 @@ export function chooseOils(foods: Food[], prefs: Preferences): { oils: OilChoice
   return { oils: { warm: pick('warm'), cold: pick('cold') }, notes }
 }
 
+function customRecipeViolation(r: CustomRule, m: Macros): string | null {
+  if (!r.enabled || m.kcal <= 0) return null
+  const e = m.protein * 4 + m.carbs * 4 + m.fat * 9
+  const v = Number(r.value)
+  if (r.kind === 'max_carb_pct' && (m.carbs * 400) / e > v) return `Kohlenhydrate ${Math.round((m.carbs * 400) / e)} % > ${v} % (eigene Regel „${r.name}“)`
+  if (r.kind === 'min_protein_pct' && (m.protein * 400) / e < v) return `Eiweiß ${Math.round((m.protein * 400) / e)} % < ${v} % (eigene Regel „${r.name}“)`
+  if (r.kind === 'max_fat_pct' && (m.fat * 900) / e > v) return `Fett ${Math.round((m.fat * 900) / e)} % > ${v} % (eigene Regel „${r.name}“)`
+  return null
+}
+
 /** Prüft ein Rezept; null = zulässig. Öl-Platzhalter werden mit dem gewählten Öl aufgelöst. */
 export function recipeViolation(r: Recipe, foods: Map<string, Food>, prefs: Preferences, oils: OilChoice): string | null {
+  const resolved: Ingredient[] = []
   for (const i of r.ingredients) {
     let id = i.foodId
     if (id === OIL_WARM) { if (!oils.warm) return 'Kein geeignetes Öl für warme Zubereitung'; id = oils.warm }
@@ -60,22 +83,53 @@ export function recipeViolation(r: Recipe, foods: Map<string, Food>, prefs: Pref
     if (!f) return `Unbekannte Zutat (${id})`
     const v = foodViolation(f, prefs)
     if (v) return v
+    resolved.push({ foodId: id, grams: i.grams })
   }
+  const m = ingredientsMacros(resolved, foods)
+  const ctx: DietContext = { foods, oils }
+  for (const s of prefs.styles) { const v = getDiet(s)?.recipeRule?.(m, resolved, ctx); if (v) return v }
+  for (const c of prefs.customRules) { const v = customRecipeViolation(c, m); if (v) return v }
   return null
 }
 
-export interface AllergenStatus { allergens: Allergen[]; unknown: boolean }
-/** Bekannte Allergene eines Rezepts; unknown=true, sobald eine Zutat keine verlässliche Allergeninfo hat. */
+export type SafetyStatus = 'ok' | 'traces' | 'unknown' | 'contains'
+export interface AllergenStatus {
+  /** Bekannte Allergene laut Lebensmitteldaten */
+  allergens: Allergen[]
+  /** Mögliche Spuren laut Lebensmitteldaten (Näherung) */
+  traces: Allergen[]
+  /** true, sobald eine Zutat keine verlässliche Allergeninformation hat */
+  unknown: boolean
+  unknownFoods: string[]
+}
 export function allergenStatus(ings: Ingredient[], foods: Map<string, Food>): AllergenStatus {
-  const set = new Set<Allergen>()
-  let unknown = false
+  const set = new Set<Allergen>(), tr = new Set<Allergen>(), unk: string[] = []
   for (const i of ings) {
     const f = foods.get(i.foodId)
-    if (!f) { unknown = true; continue }
-    if (!f.allergenInfoKnown) unknown = true
+    if (!f) { unk.push(i.foodId); continue }
+    if (!f.allergenInfoKnown) unk.push(f.name)
     f.allergens.forEach(a => set.add(a))
+    ;(f.traces ?? []).forEach(a => tr.add(a))
   }
-  return { allergens: [...set], unknown }
+  return { allergens: [...set], traces: [...tr].filter(a => !set.has(a)), unknown: unk.length > 0, unknownFoods: unk }
+}
+
+/**
+ * Sicherheitsstatus bezüglich der Nutzer-Restriktionen. „ok“ bedeutet NUR: laut hinterlegten Daten kein Treffer –
+ * keine Garantie der Allergenfreiheit (Datenlücken, Spuren und Herstellungsprozesse sind nicht vollständig erfasst).
+ */
+export function safetyFor(ings: Ingredient[], foods: Map<string, Food>, prefs: Preferences): { status: SafetyStatus; reasons: string[] } {
+  const st = allergenStatus(ings, foods)
+  const reasons: string[] = []
+  let status: SafetyStatus = 'ok'
+  for (const r of prefs.restrictions) {
+    if (st.allergens.includes(r.allergen)) { status = 'contains'; reasons.push(`Enthält ${ALLERGEN_LABEL[r.allergen]}`) }
+  }
+  if (status !== 'contains' && st.unknown && prefs.restrictions.length) { status = 'unknown'; reasons.push(`Keine Allergeninformation: ${st.unknownFoods.join(', ')}`) }
+  if (status === 'ok') {
+    for (const r of prefs.restrictions) if (st.traces.includes(r.allergen)) { status = 'traces'; reasons.push(`Mögliche Spuren von ${ALLERGEN_LABEL[r.allergen]}`) }
+  }
+  return { status, reasons }
 }
 
 export function recipeAnimalProfile(ings: Ingredient[], foods: Map<string, Food>) {
@@ -90,64 +144,38 @@ export function recipeAnimalProfile(ings: Ingredient[], foods: Map<string, Food>
   return { meat, fish, other }
 }
 
-/** Anteil (0..1) der Nicht-Öl-Zutaten (nach Gewicht), die als basisch-geeignet markiert sind. */
-export function basicShare(r: Recipe, foods: Map<string, Food>): number {
-  let tot = 0, b = 0
-  for (const i of r.ingredients) {
-    if (isPlaceholder(i.foodId)) continue
-    const f = foods.get(i.foodId)
-    if (!f) continue
-    tot += i.grams
-    if (f.basic) b += i.grams
-  }
-  return tot ? b / tot : 0
+/** Passung eines Rezepts zu einer Ernährungsweise (0..1); Weisen ohne weiche Regel liefern 1. */
+export function styleFit(r: Recipe, style: string, foods: Map<string, Food>, oils: OilChoice): number {
+  const d = getDiet(style)
+  if (!d?.fit) return 1
+  const resolved = resolveIngredients(r.ingredients, oils)
+  return d.fit(r, ingredientsMacros(resolved, foods), { foods, oils })
 }
 
-/** Wie gut ein Rezept zu einem Stil passt (0..1). */
-export function styleFit(r: Recipe, style: Style, foods: Map<string, Food>, oils: OilChoice): number {
-  switch (style) {
-    case 'vegan': return recipeAnimalProfile(r.ingredients, foods).meat || recipeAnimalProfile(r.ingredients, foods).fish || recipeAnimalProfile(r.ingredients, foods).other ? 0 : 1
-    case 'vegetarisch': { const a = recipeAnimalProfile(r.ingredients, foods); return a.meat || a.fish ? 0 : 1 }
-    case 'basisch': return Math.min(1, (r.tags.includes('basisch') ? 0.4 : 0) + basicShare(r, foods) * 0.8)
-    case 'mediterran': {
-      const a = recipeAnimalProfile(r.ingredients, foods)
-      let s = r.tags.includes('mediterran') ? 0.7 : 0.2
-      if (a.meat) s -= 0.2
-      if (a.fish) s += 0.15
-      return Math.max(0, Math.min(1, s))
-    }
-    case 'lowcarb': { const sh = macroShares(recipeMacros(r, foods, oils)); return sh.carbs <= 25 ? 1 : sh.carbs >= 50 ? 0 : (50 - sh.carbs) / 25 }
-    case 'highprotein': { const sh = macroShares(recipeMacros(r, foods, oils)); return sh.protein >= 30 ? 1 : sh.protein <= 15 ? 0 : (sh.protein - 15) / 15 }
-    default: return 1
-  }
-}
+/** Ernährungsweisen mit weicher Bewertung (Gewicht > 0) unter den gewählten. */
+export const softStyles = (styles: string[]) => styles.filter(s => !!getDiet(s)?.fit)
+export const fitWeight = (style: string) => getDiet(style)?.fitWeight ?? 1.5
+export const macroTarget = (styles: string[]) => macroTargetFor(styles)
 
-/** Soft-Stile, die den Score beeinflussen (vegan/vegetarisch sind harte Regeln). */
-export const SOFT_STYLES: Style[] = ['basisch', 'mediterran', 'lowcarb', 'highprotein']
-
-export const MACRO_TARGETS: Record<'default' | 'lowcarb' | 'highprotein', { protein: number; carbs: number; fat: number }> = {
-  default: { protein: 20, carbs: 50, fat: 30 },
-  lowcarb: { protein: 25, carbs: 25, fat: 50 },
-  highprotein: { protein: 30, carbs: 40, fat: 30 },
-}
-export function macroTarget(styles: Style[]) {
-  if (styles.includes('lowcarb')) return MACRO_TARGETS.lowcarb
-  if (styles.includes('highprotein')) return MACRO_TARGETS.highprotein
-  return MACRO_TARGETS.default
-}
-
-/** Findet widersprüchliche Einstellungen. */
-export function detectConflicts(prefs: Preferences): string[] {
-  const out: string[] = []
-  const s = prefs.styles
-  if (s.includes('vegan') && s.includes('vegetarisch')) out.push('„Vegan“ und „Vegetarisch“ gewählt – es gilt die strengere Regel (vegan).')
-  if (s.includes('vegan') && s.includes('mediterran')) out.push('Mediterran ist üblicherweise fisch- und milchbasiert; mit „Vegan“ bleiben nur pflanzliche Rezepte übrig.')
-  if (s.includes('lowcarb') && s.includes('highprotein')) out.push('Low Carb und High Protein werden kombiniert: der Plan priorisiert Low Carb mit erhöhtem Eiweißanteil.')
-  if (s.includes('vegan') && s.includes('highprotein')) out.push('Vegan + High Protein: der Eiweißanteil ist mit den vorhandenen Rezepten begrenzt.')
+export interface PrefsAnalysis { conflicts: string[]; tensions: string[]; infos: string[]; other: string[] }
+export function analyzePrefs(prefs: Preferences): PrefsAnalysis {
+  const c = analyzeCombination(prefs.styles)
+  const other: string[] = []
   const both = prefs.preferredFoods.filter(id => prefs.excludedFoods.includes(id))
-  if (both.length) out.push('Einige Lebensmittel sind gleichzeitig bevorzugt und ausgeschlossen (Ausschluss hat Vorrang).')
-  if (prefs.restrictions.some(r => r.allergen === 'nuesse' && r.severity === 'allergy') && prefs.preferredFoods.some(id => ['walnuss', 'mandeln', 'haselnuss'].includes(id)))
-    out.push('Nussallergie und bevorzugte Nüsse widersprechen sich (Allergie hat Vorrang).')
-  if (prefs.oils.main && prefs.oils.excluded.includes(prefs.oils.main)) out.push('Das Hauptöl ist gleichzeitig ausgeschlossen (Ausschluss hat Vorrang).')
-  return out
+  if (both.length) other.push('Einige Lebensmittel sind gleichzeitig bevorzugt und ausgeschlossen (Ausschluss hat Vorrang).')
+  if (prefs.restrictions.some(r => r.allergen === 'nuesse' && r.severity === 'allergy') && prefs.preferredFoods.some(id => ['walnuss', 'mandeln', 'haselnuss', 'macadamia'].includes(id)))
+    other.push('Nussallergie und bevorzugte Nüsse widersprechen sich (Allergie hat Vorrang).')
+  if (prefs.oils.main && prefs.oils.excluded.includes(prefs.oils.main)) other.push('Das Hauptöl ist gleichzeitig ausgeschlossen (Ausschluss hat Vorrang).')
+  for (const r of prefs.restrictions) if (r.severity === 'allergy' && INTOLERANCE_ONLY.includes(r.allergen))
+    other.push(`${ALLERGEN_LABEL[r.allergen]} ist medizinisch meist eine Unverträglichkeit; als „Allergie“ markiert wird es besonders streng behandelt (auch unbekannte Zutaten und Spuren).`)
+  const ks = prefs.customRules.filter(r => r.enabled && r.kind === 'max_carb_pct')
+  if (ks.length && prefs.customRules.some(r => r.enabled && r.kind === 'min_protein_pct' && Number(r.value) + Number(ks[0].value) > 100))
+    other.push('Eigene Regeln (maximale Kohlenhydrate / minimales Eiweiß) lassen sich rechnerisch kaum gemeinsam erfüllen.')
+  return { ...c, other }
+}
+
+/** Alle Hinweise als Liste (Kompatibilität / einfache Anzeige). */
+export function detectConflicts(prefs: Preferences): string[] {
+  const a = analyzePrefs(prefs)
+  return [...a.conflicts, ...a.tensions, ...a.infos, ...a.other]
 }

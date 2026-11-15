@@ -1,7 +1,10 @@
-import type { Allergen, AnimalOrigin, Category, Food, OilProps } from '../domain/types'
+import type { Allergen, AnimalOrigin, Category, Food, FoodGroup, OilProps, Prep } from '../domain/types'
+
+/** Bei jeder Änderung der eingebauten Daten erhöhen – frischt gespeicherte Standarddaten auf. */
+export const BUILTIN_DATA_VERSION = 2
 
 export const SOURCE_NOTE =
-  'Richtwerte (gerundet) in Anlehnung an USDA FoodData Central (Public Domain / CC0). Nicht einzeln gegen die Quelle geprüft.'
+  'Gerundeter Richtwert in Anlehnung an USDA FoodData Central (Public Domain / CC0). Nicht einzeln gegen die Quelle geprüft.'
 
 type Row = [id: string, name: string, cat: Category, kcal: number, p: number, c: number, f: number, fiber: number,
   allergens?: Allergen[], animal?: AnimalOrigin, extra?: Partial<Food>]
@@ -121,9 +124,60 @@ const ROWS: Row[] = [
   ['kokosmilch', 'Kokosmilch', 'sonstige', 197, 2, 3, 21, 0, A(), 'none'],
   ['sojasauce', 'Sojasauce', 'sonstige', 53, 8, 5, 0.6, 0.8, A('soja', 'gluten', 'histamin'), 'none'],
   ['balsamico', 'Balsamico-Essig', 'sonstige', 88, 0.5, 17, 0, 0, A('histamin'), 'none'],
+  // Ergänzungen für Carnivore / Keto / Paleo (gerundete Richtwerte, nicht verifiziert)
+  ['rumpsteak', 'Rumpsteak (Rind)', 'fleisch', 150, 21, 0, 7, 0, A(), 'meat'],
+  ['speck', 'Speck (roh)', 'fleisch', 541, 37, 1.4, 42, 0, A('histamin'), 'meat'],
+  ['haehnchenschenkel', 'Hähnchenschenkel mit Haut (roh)', 'fleisch', 221, 16.7, 0, 16.5, 0, A(), 'meat'],
+  ['sardinen', 'Sardinen (Dose, abgetropft)', 'fisch', 208, 24.6, 0, 11.5, 0, A('fisch', 'histamin'), 'fish'],
+  ['sahne', 'Schlagsahne (30 %)', 'milch', 292, 2.4, 3.3, 30, 0, A('laktose', 'milch'), 'dairy'],
+  ['gouda', 'Gouda', 'milch', 356, 25, 2.2, 27.4, 0, A('laktose', 'milch', 'histamin'), 'dairy'],
+  ['frischkaese', 'Frischkäse (Doppelrahm)', 'milch', 342, 6, 4, 34, 0, A('laktose', 'milch'), 'dairy'],
+  ['oliven', 'Oliven (grün, mariniert)', 'gemuese', 115, 0.8, 6, 11, 3.2, A('histamin'), 'none', { basic: true }],
+  ['macadamia', 'Macadamia-Nüsse', 'nuesse', 718, 7.9, 14, 76, 8.6, A('nuesse'), 'none'],
 ]
 
+
+const LEGUMES = new Set(['linsen', 'kichererbsen', 'kidneybohnen', 'tofu', 'sojadrink', 'erdnussmus', 'sojasauce'])
+const GRAINS = new Set(['haferflocken', 'quinoa', 'naturreis', 'hirse', 'buchweizen', 'vollkornnudeln', 'vollkornbrot', 'haferdrink'])
+const SUGARS = new Set(['honig', 'ahornsirup'])
+const NUT_DRINK = new Set(['mandeldrink'])
+const PROCESSED = new Set(['vollkornbrot', 'kochschinken', 'speck', 'tofu', 'haferdrink', 'sojadrink', 'mandeldrink', 'honig', 'ahornsirup', 'tomatenmark',
+  'passata', 'gemuesebruehe', 'kokosmilch', 'sojasauce', 'balsamico', 'erdnussmus', 'butter', 'ghee', 'joghurt', 'skyr', 'quark', 'feta', 'parmesan',
+  'sahne', 'gouda', 'frischkaese', 'oliven'])
+const DRIED = new Set(['rosinen', 'datteln', 'kurkuma', 'zimt', 'kreuzkuemmel', 'paprikapulver'])
+/** Gluten-/Nuss-Spuren: bei Rohware aus Mühlen/Mischbetrieben üblich (Näherung) */
+const TRACES: Record<string, Allergen[]> = {
+  quinoa: ['gluten'], hirse: ['gluten'], buchweizen: ['gluten'], linsen: ['gluten'], haferflocken: ['nuesse'],
+  chia: ['nuesse'], leinsamen: ['nuesse'], sonnenblumenkerne: ['nuesse'], kuerbiskerne: ['nuesse'],
+}
+
+function groupOf(id: string, cat: Category, animal: AnimalOrigin): FoodGroup {
+  if (id === 'garnelen') return 'schalentiere'
+  if (SUGARS.has(id)) return 'zucker'
+  if (LEGUMES.has(id) || id === 'kichererbsen') return 'huelsenfrucht'
+  if (GRAINS.has(id)) return 'getreide'
+  if (NUT_DRINK.has(id)) return 'nuss_samen'
+  if (id === 'ei') return 'ei'
+  if (animal === 'dairy' && cat === 'oele') return 'oel_fett'
+  const m: Record<Category, FoodGroup> = {
+    gemuese: 'gemuese', obst: 'obst', fleisch: 'fleisch', fisch: 'fisch', milch: 'milch', getreide: 'getreide', nuesse: 'nuss_samen',
+    oele: 'oel_fett', gewuerze: 'gewuerz', getraenke: 'getraenk', sonstige: 'sonstige',
+  }
+  return m[cat]
+}
+
+function prepOf(id: string, cat: Category, name: string): Prep {
+  if (name.includes('(Dose')) return 'konserviert'
+  if (name.includes('(roh)') || name.includes('(TK)')) return 'roh'
+  if (DRIED.has(id)) return 'getrocknet'
+  if (PROCESSED.has(id) || cat === 'oele') return 'verarbeitet'
+  return 'roh'
+}
+
 export const BUILTIN_FOODS: Food[] = ROWS.map(([id, name, category, kcal, protein, carbs, fat, fiber, allergens = [], animal = 'none', extra = {}]) => ({
-  id, name, category, kcal, protein, carbs, fat, fiber, allergens, allergenInfoKnown: true, animal,
-  source: SOURCE_NOTE, verified: false, ...extra,
+  id, name, category, kcal, protein, carbs, fat, fiber, allergens, traces: TRACES[id] ?? [], allergenInfoKnown: true, animal,
+  group: groupOf(id, category, animal), prep: prepOf(id, category, name),
+  source: SOURCE_NOTE, dataQuality: 'reference' as const,
+  sourceRef: { name: 'USDA FoodData Central (Näherungswert, nicht gegen die Quelle geprüft)', license: 'CC0 1.0 / Public Domain' },
+  ...extra,
 }))

@@ -1,0 +1,10 @@
+{
+  "currency": "USD",
+  "note": "Preise pro 1 Mio. Token. Kosten werden nur berechnet, wenn fuer 'provider:modell' ein Eintrag existiert; sonst bleibt cost_usd null (unbekannt). Eintraege koennen selbst ergaenzt werden. Caching-Rabatte werden nicht beruecksichtigt (es wird kein Caching genutzt). OpenAI-Preise sind bewusst nicht hinterlegt.",
+  "per_million_tokens": {
+    "anthropic:claude-opus-5-5": {"input": 4.0, "output": 20.0, "as_of": "2026-11-03", "source": "Anthropic-Preisliste laut Claude-API-Skill-Cache"},
+    "anthropic:claude-fable-5-2": {"input": 8.0, "output": 40.0, "as_of": "2026-11-03", "source": "Anthropic-Preisliste laut Claude-API-Skill-Cache"},
+    "anthropic:claude-sonnet-5-5": {"input": 2.0, "output": 10.0, "as_of": "2026-11-03", "source": "Anthropic-Preisliste laut Claude-API-Skill-Cache"},
+    "anthropic:claude-haiku-5-5": {"input": 0.10, "output": 0.50, "max_prompt_tokens": 100000, "as_of": "2026-11-03", "source": "Anthropic-Preisliste laut Claude-API-Skill-Cache", "note": "Preis gilt bis 100K Prompt-Tokens; darueber ist die Berechnung unbekannt (null)."}
+  }
+}

@@ -33,8 +33,8 @@ describe('Datenintegrität', () => {
       expect(Math.abs(est - f.kcal), f.id).toBeLessThanOrEqual(Math.max(40, f.kcal * 0.25))
     }
   })
-  it('keine Lebensmittel sind als verifiziert gekennzeichnet (Werte sind Richtwerte)', () => {
-    expect(BUILTIN_FOODS.every(f => f.verified === false)).toBe(true)
+  it('keine eingebauten Lebensmittel sind als verifiziert gekennzeichnet (Werte sind Richtwerte)', () => {
+    expect(BUILTIN_FOODS.every(f => f.dataQuality === 'reference')).toBe(true)
   })
 })
 
@@ -90,8 +90,11 @@ describe('Kalorien- und Makroberechnung', () => {
 describe('Allergien und Ausschlussregeln', () => {
   it('Allergie und Unverträglichkeit schließen Lebensmittel mit Allergen aus', () => {
     const p = prefs({ restrictions: [{ allergen: 'nuesse', severity: 'allergy' }] })
-    expect(foodViolation(foods.get('walnuss')!, p)).toMatch(/nuesse/)
-    expect(foodViolation(foods.get('haferflocken' as never) ?? foods.get('haferflocken')!, p)).toBeNull()
+    expect(foodViolation(foods.get('walnuss')!, p)).toMatch(/Nüsse/)
+    // Spuren: Haferflocken können Nuss-Spuren enthalten → bei Allergie standardmäßig ausgeschlossen, abschaltbar
+    expect(foodViolation(foods.get('haferflocken')!, p)).toMatch(/Spuren/)
+    expect(foodViolation(foods.get('haferflocken')!, { ...p, strictTraces: false })).toBeNull()
+    expect(foodViolation(foods.get('tomate')!, p)).toBeNull()
     const q = prefs({ restrictions: [{ allergen: 'gluten', severity: 'intolerance' }] })
     expect(foodViolation(foods.get('vollkornbrot')!, q)).not.toBeNull()
   })
@@ -176,12 +179,16 @@ describe('Planerstellung', () => {
       for (const d of plan.days) expect(Math.abs(dayTotals(d, ctx).kcal - k) / k).toBeLessThan(0.03)
     }
   })
-  it('3000 kcal: Portionsgrenze erreicht → Abweichung wird gemeldet statt verschwiegen', () => {
-    const plan = gen({ kcalMode: 'manual', kcalManual: 3000, mealCount: 4 })
-    const ctx = ctxFor(), a = analyzePlan(plan, ctx, 4)
-    const maxDev = Math.max(...a.days.map(d => Math.abs(d.devPct)))
-    if (maxDev > 5) expect(a.issues.some(i => i.text.includes('5 %'))).toBe(true)
-    expect(a.issues.some(i => i.text.includes('Grenze realistischer Portionsgrößen'))).toBe(true)
+  it('3000 kcal mit 4 Mahlzeiten wird auf ±3 % erreicht (früher bis 11 % Abweichung)', () => {
+    const plan = gen({ kcalMode: 'manual', kcalManual: 3000, mealCount: 4 }, {}, 14)
+    const ctx = ctxFor()
+    for (const d of plan.days) expect(Math.abs(dayTotals(d, ctx).kcal - 3000) / 3000).toBeLessThan(0.03)
+  })
+  it('4000 kcal: physikalisch nicht erreichbar → Abweichung wird gemeldet statt verschwiegen', () => {
+    const plan = gen({ kcalMode: 'manual', kcalManual: 4000, mealCount: 3 }, {}, 7)
+    const a = analyzePlan(plan, ctxFor(), 3)
+    expect(Math.max(...a.days.map(d => Math.abs(d.devPct)))).toBeGreaterThan(5)
+    expect(a.issues.some(i => i.level === 'error' && i.text.includes('5 %'))).toBe(true)
   })
   it('verwendet nur erlaubte Lebensmittel (Allergien + Ausschlüsse), inkl. Öl', () => {
     const p = prefs({ restrictions: [{ allergen: 'nuesse', severity: 'allergy' }, { allergen: 'laktose', severity: 'intolerance' }, { allergen: 'gluten', severity: 'allergy' }], excludedFoods: ['lachs', 'tofu'], oils: { preferred: ['walnussoel'], excluded: [], main: 'walnussoel', warm: null, cold: null } })

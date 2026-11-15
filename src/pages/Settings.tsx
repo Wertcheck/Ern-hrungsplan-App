@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { useStore, parseImport } from '../store'
+import { useStore } from '../store'
+import { parseJsonText } from '../domain/persistence'
 import { Btn, Card, Notice, PageTitle } from '../ui/kit'
 import { OilForm, ProfileForm, RestrictionForm, StyleForm } from './forms'
 import { defaultState } from '../domain/defaults'
@@ -16,14 +17,15 @@ export function SettingsPage() {
     setMsg({ level: 'info', text: 'Export erstellt.' })
   }
   const importData = async (f: File) => {
-    const r = parseImport(await f.text())
-    if (typeof r === 'string') return setMsg({ level: 'error', text: r })
+    if (f.size > 20 * 1024 * 1024) return setMsg({ level: 'error', text: 'Datei ist zu groß (max. 20 MB).' })
+    const r = parseJsonText(await f.text(), 'import')
+    if (!r.ok) return setMsg({ level: 'error', text: `Import abgelehnt: ${r.error} Deine aktuellen Daten wurden nicht verändert.` })
     if (!confirm('Aktuelle Daten durch die Sicherung ersetzen?')) return
-    replace(r); setMsg({ level: 'info', text: 'Sicherung importiert.' })
+    replace(r.state); setMsg({ level: 'info', text: 'Sicherung importiert.' })
   }
   const wipe = () => {
     if (!confirm('Wirklich ALLE Daten (Profil, Lebensmittel, Rezepte, Plan, Gewichtsverlauf) unwiderruflich löschen?')) return
-    reset(); setMsg({ level: 'info', text: 'Alle Daten wurden gelöscht.' })
+    const removed = reset(); setMsg({ level: 'info', text: `Alle Daten wurden gelöscht (${removed.length} Speichereinträge entfernt).` })
   }
   const restoreDb = () => {
     if (!confirm('Lebensmittel- und Rezeptdatenbank auf den Auslieferungszustand zurücksetzen? Eigene Einträge gehen verloren.')) return

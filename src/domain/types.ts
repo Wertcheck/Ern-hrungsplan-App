@@ -28,6 +28,39 @@ export interface OilProps {
   note: string
 }
 
+export type Prep = 'roh' | 'gekocht' | 'konserviert' | 'getrocknet' | 'verarbeitet' | 'zubereitet'
+export const PREP_LABEL: Record<Prep, string> = {
+  roh: 'roh / ungegart', gekocht: 'gekocht', konserviert: 'Konserve (abgetropft)', getrocknet: 'getrocknet',
+  verarbeitet: 'verarbeitet', zubereitet: 'zubereitet',
+}
+
+/** Funktionelle Lebensmittelgruppe – Grundlage für Ernährungsweisen-Regeln (unabhängig von der Anzeigekategorie). */
+export type FoodGroup =
+  | 'gemuese' | 'obst' | 'fleisch' | 'fisch' | 'schalentiere' | 'milch' | 'ei' | 'getreide' | 'huelsenfrucht'
+  | 'nuss_samen' | 'oel_fett' | 'gewuerz' | 'getraenk' | 'zucker' | 'sonstige'
+export const GROUP_LABEL: Record<FoodGroup, string> = {
+  gemuese: 'Gemüse', obst: 'Obst', fleisch: 'Fleisch', fisch: 'Fisch', schalentiere: 'Schalentiere', milch: 'Milchprodukte',
+  ei: 'Eier', getreide: 'Getreide', huelsenfrucht: 'Hülsenfrüchte', nuss_samen: 'Nüsse & Samen', oel_fett: 'Öle & Fette',
+  gewuerz: 'Gewürze & Kräuter', getraenk: 'Getränke', zucker: 'Zucker & Süßungsmittel', sonstige: 'Sonstiges',
+}
+
+/** verified = gegen Originalquelle geprüft; reference = gerundeter Richtwert (nicht geprüft); user = eigene Angabe; missing = Wert fehlt */
+export type DataQuality = 'verified' | 'reference' | 'user' | 'missing'
+export const QUALITY_LABEL: Record<DataQuality, string> = {
+  verified: 'Verifiziert', reference: 'Richtwert (nicht verifiziert)', user: 'Eigene Angabe', missing: 'Daten fehlen',
+}
+
+export const MICRO_KEYS = ['calcium', 'magnesium', 'kalium', 'eisen', 'zink', 'vitaminA', 'vitaminB12', 'vitaminC', 'vitaminD', 'vitaminE', 'folat'] as const
+export type MicroKey = (typeof MICRO_KEYS)[number]
+export const MICRO_INFO: Record<MicroKey, { label: string; unit: string }> = {
+  calcium: { label: 'Calcium', unit: 'mg' }, magnesium: { label: 'Magnesium', unit: 'mg' }, kalium: { label: 'Kalium', unit: 'mg' },
+  eisen: { label: 'Eisen', unit: 'mg' }, zink: { label: 'Zink', unit: 'mg' }, vitaminA: { label: 'Vitamin A (RAE)', unit: 'µg' },
+  vitaminB12: { label: 'Vitamin B12', unit: 'µg' }, vitaminC: { label: 'Vitamin C', unit: 'mg' }, vitaminD: { label: 'Vitamin D', unit: 'µg' },
+  vitaminE: { label: 'Vitamin E', unit: 'mg' }, folat: { label: 'Folat', unit: 'µg' },
+}
+
+export interface SourceRef { name: string; id?: string; license?: string; retrieved?: string }
+
 export interface Food {
   id: string
   name: string
@@ -39,9 +72,14 @@ export interface Food {
   fat: number
   fiber: number
   allergens: Allergen[]
+  /** Mögliche Spuren / Kreuzkontamination (Näherung, nicht vollständig) */
+  traces: Allergen[]
   /** false = Allergeninfo unbekannt (z. B. eigenes Lebensmittel ohne Angabe) */
   allergenInfoKnown: boolean
   animal: AnimalOrigin
+  group: FoodGroup
+  /** Zustand, auf den sich die Nährwerte und Rezeptgramm beziehen */
+  prep: Prep
   /** passt zum basischen Ernährungsstil (Gemüse, Obst, Kräuter, geeignete Pflanzen) */
   basic?: boolean
   /** schwer erhältliche Zutat */
@@ -49,10 +87,11 @@ export interface Food {
   /** Haushaltseinheit, z. B. 1 Stück = 55 g */
   unit?: { label: string; grams: number }
   oil?: OilProps
-  micros?: Record<string, string>
+  /** Mikronährstoffe pro 100 g; fehlende Schlüssel = keine Daten (nie 0 annehmen) */
+  micros?: Partial<Record<MicroKey, number>>
   source: string
-  /** true nur, wenn Werte gegen eine Referenzquelle geprüft wurden */
-  verified: boolean
+  sourceRef?: SourceRef
+  dataQuality: DataQuality
   custom?: boolean
 }
 
@@ -61,11 +100,14 @@ export const SLOT_LABEL: Record<MealSlot, string> = {
   fruehstueck: 'Frühstück', mittag: 'Mittagessen', abend: 'Abendessen', snack: 'Snack',
 }
 
+/** Kennungen der eingebauten Ernährungsweisen. Weitere Weisen werden in domain/diets.ts registriert. */
 export type Style =
-  | 'basisch' | 'mediterran' | 'vegetarisch' | 'vegan' | 'lowcarb' | 'highprotein' | 'mischkost' | 'individuell'
+  | 'carnivore' | 'vegan' | 'vegetarisch' | 'pescetarisch' | 'flexitarisch' | 'keto' | 'lowcarb'
+  | 'highprotein' | 'paleo' | 'mediterran' | 'basisch' | 'mischkost'
 export const STYLE_LABEL: Record<Style, string> = {
-  basisch: 'Basische Ernährung', mediterran: 'Mediterran', vegetarisch: 'Vegetarisch', vegan: 'Vegan',
-  lowcarb: 'Low Carb', highprotein: 'High Protein', mischkost: 'Ausgewogene Mischkost', individuell: 'Individuell',
+  carnivore: 'Carnivore', vegan: 'Vegan', vegetarisch: 'Vegetarisch', pescetarisch: 'Pescetarisch', flexitarisch: 'Flexitarisch',
+  keto: 'Ketogen / Keto', lowcarb: 'Low Carb', highprotein: 'High Protein', paleo: 'Paleo', mediterran: 'Mediterran',
+  basisch: 'Basisch', mischkost: 'Ausgewogene Mischkost',
 }
 
 export const OIL_WARM = 'oil:warm'
@@ -120,8 +162,14 @@ export interface OilPrefs {
   cold: string | null
 }
 
+export type RuleKind = 'exclude_group' | 'exclude_category' | 'exclude_term' | 'max_carb_pct' | 'min_protein_pct' | 'max_fat_pct'
+export interface CustomRule { id: string; name: string; kind: RuleKind; value: string | number; enabled: boolean }
+
 export interface Preferences {
   styles: Style[]
+  customRules: CustomRule[]
+  /** Bei Allergien auch „Spuren“ als Ausschluss behandeln */
+  strictTraces: boolean
   restrictions: Restriction[]
   customExclusions: string[]
   excludedFoods: string[]
@@ -155,8 +203,16 @@ export interface ShoppingState {
   manual: { id: string; name: string; amount: string; checked: boolean }[]
 }
 
+export interface AiShare { body: boolean; plan: boolean; shopping: boolean; progress: boolean; foodPrefs: boolean }
+export type ActionStatus = 'pending' | 'applied' | 'dismissed' | 'rejected'
+export interface ChatAction { id: string; proposal: Record<string, unknown>; status: ActionStatus; note?: string }
+export interface ChatMessage { id: string; role: 'user' | 'assistant'; content: string; ts: string; provider?: string; model?: string; error?: string; actions?: ChatAction[] }
+export interface AiState { consent: boolean; share: AiShare; chat: ChatMessage[] }
+
 export interface AppState {
-  version: 1
+  version: 2
+  /** Version der eingebauten Lebensmittel-/Rezeptdaten; bei Anhebung werden Standarddaten aufgefrischt */
+  dataVersion: number
   onboarded: boolean
   profile: Profile
   prefs: Preferences
@@ -166,4 +222,5 @@ export interface AppState {
   shopping: ShoppingState
   weights: { date: string; kg: number }[]
   eaten: Record<string, boolean>
+  ai: AiState
 }
