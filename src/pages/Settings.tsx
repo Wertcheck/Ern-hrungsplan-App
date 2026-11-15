@@ -56,7 +56,7 @@ export function SettingsPage() {
       </Card>
       <Card className="text-sm text-muted">
         <h2 className="text-xl text-ink mb-1">Hinweise</h2>
-        <p>Nährwerte sind gerundete Richtwerte in Anlehnung an USDA FoodData Central (Public Domain / CC0) und nicht einzeln verifiziert. Kalorienziele sind grobe Schätzungen. Diese App ersetzt keine ärztliche oder ernährungsmedizinische Beratung; bei Allergien immer Produktetiketten prüfen.</p>
+        <p>Nährwerte der meisten Standard-Lebensmittel stammen aus dem Bundeslebensmittelschlüssel (BLS 4.0, Max Rubner-Institut, CC BY 4.0; DOI 10.25826/Data20251217-134202-0). Lebensmittel ohne BLS-Zuordnung sind als „Richtwert (nicht verifiziert)“ gekennzeichnet, eigene Angaben als „Eigene Angabe“. Kalorienziele sind grobe Schätzungen. Diese App ersetzt keine ärztliche oder ernährungsmedizinische Beratung; bei Allergien immer Produktetiketten prüfen.</p>
       </Card>
     </div>
   )

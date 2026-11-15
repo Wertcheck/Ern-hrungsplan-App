@@ -1,0 +1,18 @@
+{
+  "dataset": "Bundeslebensmittelschlüssel (BLS)",
+  "version": "4.0",
+  "publisher": "Max Rubner-Institut (MRI), Karlsruhe",
+  "doi": "10.25826/Data20251217-134202-0",
+  "license": "CC BY 4.0",
+  "licenseUrl": "https://creativecommons.org/licenses/by/4.0/deed.de",
+  "downloadPage": "https://www.blsdb.de/download",
+  "allowedHosts": ["www.blsdb.de", "blsdb.de"],
+  "archiveName": "BLS_4_0_2025_DE.zip",
+  "archiveSha256": "12b7a6ba62807ec9b301eb276f897dc85f99b2292311618dec3749a12d984c91",
+  "archiveBytes": 14263306,
+  "dataFile": "BLS_4_0_Daten_2025_DE.xlsx",
+  "componentsFile": "BLS_4_0_Components_DE_EN.xlsx",
+  "docFile": "BLS_4_0_Dokumentation_DE.pdf",
+  "retrieved": "2026-11-15",
+  "citation": "Max Rubner-Institut (2025): Bundeslebensmittelschlüssel (BLS), Version 4.0 — Deutsche Nährstoffdatenbank. Karlsruhe. DOI: 10.25826/Data20251217-134202-0"
+}

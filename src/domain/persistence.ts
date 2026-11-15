@@ -62,6 +62,11 @@ export function parseState(raw: unknown, mode: 'load' | 'import'): ParseOutcome 
   const ver = raw.version
   if (ver !== 1 && ver !== 2) return { ok: false, error: `Inkompatible Datenversion (${typeof ver === 'number' ? ver : 'unbekannt'}).` }
   if (typeof raw.onboarded !== 'boolean') return { ok: false, error: 'Datei ist unvollständig (onboarded fehlt).' }
+  if (mode === 'import' && ver === 2) {
+    // Aktuelle Sicherungsdateien müssen vollständig sein – nur ältere (v1) Dateien dürfen nachgerüstet werden.
+    const missing = Object.keys(SECTION_SCHEMAS).filter(k => raw[k] === undefined)
+    if (missing.length) return { ok: false, error: `Datei ist unvollständig (fehlend: ${missing.join(', ')}).` }
+  }
   const m = migrate(raw)
   const d = defaultState()
   const warnings: string[] = []

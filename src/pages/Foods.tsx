@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../store'
 import { Btn, Card, Chip, Field, NumInput, Notice, PageTitle, Sheet, fmt, inputCls, cx, CAT_EMOJI } from '../ui/kit'
+import { BlsBrowser } from './BlsBrowser'
 import { foodInputSchema } from '../domain/schemas'
 import { foodViolation } from '../domain/rules'
 import { ALLERGENS, ALLERGEN_LABEL, CATEGORIES, CATEGORY_LABEL, GROUP_LABEL, MICRO_INFO, MICRO_KEYS, PREP_LABEL, QUALITY_LABEL, type Allergen, type AnimalOrigin, type Category, type Food, type FoodGroup, type MicroKey, type Prep } from '../domain/types'
@@ -14,6 +15,7 @@ export function FoodsPage() {
   const [cat, setCat] = useState<Category | 'alle'>('alle')
   const [filter, setFilter] = useState<Filter>('alle')
   const [edit, setEdit] = useState<Food | null>(null)
+  const [tab, setTab] = useState<'meine' | 'bls'>('meine')
   const { prefs } = state
   const list = useMemo(() => {
     const t = q.trim().toLowerCase()
@@ -42,6 +44,11 @@ export function FoodsPage() {
   return (
     <div>
       <PageTitle title="Meine Lebensmittel" sub={`${state.foods.length} Lebensmittel · Richtwerte pro 100 g`} right={<Btn onClick={() => setEdit(blank())}>+ Neu</Btn>} />
+      <div className="flex gap-2 mb-3" role="tablist" aria-label="Datenbestand">
+        <Chip active={tab === 'meine'} onClick={() => setTab('meine')}>Meine Lebensmittel</Chip>
+        <Chip active={tab === 'bls'} onClick={() => setTab('bls')}>BLS-Datenbank (7.140)</Chip>
+      </div>
+      {tab === 'bls' ? <BlsBrowser /> : <>
       <input className={cx(inputCls, 'mb-3')} placeholder="Lebensmittel suchen…" value={q} onChange={e => setQ(e.target.value)} aria-label="Lebensmittel suchen" />
       <div className="flex gap-2 overflow-x-auto pb-2">
         <Chip active={cat === 'alle'} onClick={() => setCat('alle')}>Alle</Chip>
@@ -67,6 +74,7 @@ export function FoodsPage() {
                     {(f.traces ?? []).filter(a => !f.allergens.includes(a)).map(a => <span key={'t' + a} className="rounded-full bg-sand/40 px-2 py-0.5" title="Mögliche Spuren (Näherung)">Spuren: {ALLERGEN_LABEL[a]}</span>)}
                     <span className="rounded-full bg-sand/40 text-sandtext px-2 py-0.5" title={f.sourceRef?.name ?? f.source}>{QUALITY_LABEL[f.dataQuality]} · {PREP_LABEL[f.prep]}</span>
                     {f.micros && Object.keys(f.micros).length > 0 && <span className="rounded-full bg-moss px-2 py-0.5">Mikronährstoffe</span>}
+                    {(f.missingFields ?? []).length > 0 && <span className="rounded-full bg-[#fbeedd] text-warn px-2 py-0.5" title="Für diese Werte liefert die Quelle keine Daten">keine Daten: {(f.missingFields ?? []).map(k => ({ kcal: 'Energie', protein: 'Eiweiß', fat: 'Fett', carbs: 'Kohlenhydrate', fiber: 'Ballaststoffe' } as Record<string, string>)[k] ?? k).join(', ')}</span>}
                     {viol && <span className="rounded-full bg-danger/10 text-danger px-2 py-0.5">wird wegen Einstellungen nicht verwendet</span>}
                   </div>
                 </div>
@@ -82,6 +90,7 @@ export function FoodsPage() {
         })}
       </div>
       {list.length === 0 && <p className="text-center text-muted py-10">Keine Lebensmittel gefunden.</p>}
+      </>}
       {edit && <FoodEditor food={edit} onClose={() => setEdit(null)} onSave={f => { save(f); setEdit(null) }} />}
     </div>
   )
@@ -106,14 +115,14 @@ function FoodEditor({ food, onClose, onSave }: { food: Food; onClose: () => void
         <Field label="Bezeichnung"><input className={inputCls} value={f.name} maxLength={80} onChange={e => setF({ ...f, name: e.target.value })} /></Field>
         <Field label="Kategorie"><select className={inputCls} value={f.category} onChange={e => setF({ ...f, category: e.target.value as Category })}>{CATEGORIES.map(c => <option key={c} value={c}>{CATEGORY_LABEL[c]}</option>)}</select></Field>
         <p className="text-sm font-medium">Nährwerte pro 100 g</p>
-        <div className="grid grid-cols-2 gap-2">{num('kcal', 'Kalorien (kcal)')}{num('protein', 'Eiweiß (g)')}{num('carbs', 'Kohlenhydrate (g)')}{num('fat', 'Fett (g)')}{num('fiber', 'Ballaststoffe (g)')}</div>
+        <div className="grid grid-cols-2 gap-2">{num('kcal', 'Kalorien (kcal)')}{num('protein', 'Eiweiß (g)')}{num('carbs', 'Kohlenhydrate, verfügbar (g)')}{num('fat', 'Fett (g)')}{num('fiber', 'Ballaststoffe (g)')}</div>
         <div className="grid grid-cols-2 gap-2">
           <Field label="Zustand der Mengenangabe"><select className={inputCls} value={f.prep} onChange={e => setF({ ...f, prep: e.target.value as Prep })}>{(Object.keys(PREP_LABEL) as Prep[]).map(p => <option key={p} value={p}>{PREP_LABEL[p]}</option>)}</select></Field>
           <Field label="Lebensmittelgruppe (für Ernährungsweisen)"><select className={inputCls} value={f.group} onChange={e => setF({ ...f, group: e.target.value as FoodGroup })}>{(Object.keys(GROUP_LABEL) as FoodGroup[]).map(g => <option key={g} value={g}>{GROUP_LABEL[g]}</option>)}</select></Field>
         </div>
         <Field label="Tierische Herkunft (für vegan/vegetarisch)">
           <select className={inputCls} value={f.animal} onChange={e => setF({ ...f, animal: e.target.value as AnimalOrigin })}>
-            <option value="none">pflanzlich</option><option value="meat">Fleisch</option><option value="fish">Fisch/Meeresfrüchte</option><option value="dairy">Milchprodukt</option><option value="egg">Ei</option><option value="honey">Honig</option>
+            <option value="none">pflanzlich</option><option value="unknown">unbekannt (zusammengesetzt)</option><option value="meat">Fleisch</option><option value="fish">Fisch/Meeresfrüchte</option><option value="dairy">Milchprodukt</option><option value="egg">Ei</option><option value="honey">Honig</option>
           </select>
         </Field>
         <div className="grid grid-cols-2 gap-2">

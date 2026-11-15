@@ -23,7 +23,7 @@ export const foodInputSchema = z.object({
   category: z.enum(CATEGORIES as [string, ...string[]]),
   kcal: num(0, 900), protein: num(0, 100), carbs: num(0, 100), fat: num(0, 100), fiber: num(0, 100),
 }).refine(v => v.protein + v.carbs + v.fat <= 100.5, { message: 'Eiweiß + Kohlenhydrate + Fett dürfen 100 g nicht überschreiten' })
-  .refine(v => Math.abs(v.protein * 4 + (v.carbs - v.fiber) * 4 + v.fiber * 2 + v.fat * 9 - v.kcal) <= Math.max(40, v.kcal * 0.25), { message: 'Kalorien passen nicht zu den Makronährstoffen (Atwater-Check)' })
+  .refine(v => Math.abs(v.protein * 4 + v.carbs * 4 + v.fiber * 2 + v.fat * 9 - v.kcal) <= Math.max(40, v.kcal * 0.25), { message: 'Kalorien passen nicht zu den Makronährstoffen (Atwater-Check)' })
 
 export const recipeInputSchema = z.object({
   name: z.string().trim().min(1, 'Name fehlt').max(80),
@@ -44,9 +44,9 @@ export const foodSchema = z.object({
   id: str(80), name: str(120), category: z.enum(CATEGORIES as [string, ...string[]]),
   kcal: num(0, 900), protein: num(0, 100), carbs: num(0, 100), fat: num(0, 100), fiber: num(0, 100),
   allergens: z.array(allergenEnum), traces: z.array(allergenEnum), allergenInfoKnown: z.boolean(),
-  animal: z.enum(['none', 'meat', 'fish', 'dairy', 'egg', 'honey']),
+  animal: z.enum(['none', 'meat', 'fish', 'dairy', 'egg', 'honey', 'unknown']),
   group: z.string(), prep: z.enum(['roh', 'gekocht', 'konserviert', 'getrocknet', 'verarbeitet', 'zubereitet']),
-  source: str(400), dataQuality: z.enum(['verified', 'reference', 'user', 'missing']),
+  missingFields: z.array(z.string()).optional(), source: str(400), dataQuality: z.enum(['verified', 'reference', 'user', 'missing']),
   micros: microsSchema.optional(), sourceRef: z.object({ name: str(), id: str().optional(), license: str().optional(), retrieved: str().optional() }).optional(),
 }).passthrough()
 

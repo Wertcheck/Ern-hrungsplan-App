@@ -27,22 +27,27 @@ describe('Datenintegrität', () => {
     expect(new Set(BUILTIN_FOODS.map(f => f.id)).size).toBe(BUILTIN_FOODS.length)
     expect(new Set(BUILTIN_RECIPES.map(r => r.id)).size).toBe(BUILTIN_RECIPES.length)
   })
-  it('Kalorien sind plausibel zu den Makros (Atwater, Ballaststoffe mit 2 kcal/g; ±25 %/40 kcal)', () => {
+  it('Kalorien sind plausibel zu den Makros (Atwater mit verfügbaren Kohlenhydraten + Ballaststoffe 2 kcal/g; ±25 %/40 kcal)', () => {
     for (const f of BUILTIN_FOODS) {
-      const est = f.protein * 4 + (f.carbs - f.fiber) * 4 + f.fiber * 2 + f.fat * 9
+      const est = f.protein * 4 + f.carbs * 4 + f.fiber * 2 + f.fat * 9
       expect(Math.abs(est - f.kcal), f.id).toBeLessThanOrEqual(Math.max(40, f.kcal * 0.25))
     }
   })
-  it('keine eingebauten Lebensmittel sind als verifiziert gekennzeichnet (Werte sind Richtwerte)', () => {
-    expect(BUILTIN_FOODS.every(f => f.dataQuality === 'reference')).toBe(true)
+  it('„verifiziert“ nur mit BLS-Quellenangabe; alle übrigen sind als Richtwert gekennzeichnet', () => {
+    for (const f of BUILTIN_FOODS) {
+      if (f.dataQuality === 'verified') { expect(f.sourceRef?.name).toMatch(/BLS/); expect(f.sourceRef?.id).toMatch(/^[A-Z][0-9A-Z]{6}$/) }
+      else expect(['reference', 'missing']).toContain(f.dataQuality)
+    }
+    expect(BUILTIN_FOODS.filter(f => f.dataQuality === 'verified').length).toBeGreaterThan(90)
   })
 })
 
 describe('Kalorien- und Makroberechnung', () => {
   it('foodMacros skaliert linear', () => {
+    // BLS 4.0, C133000 „Hafer Flocken“: 348 kcal, 13,22 g Protein je 100 g (im Original geprüft)
     const m = foodMacros(foods.get('haferflocken')!, 50)
-    expect(m.kcal).toBeCloseTo(186, 0)
-    expect(m.protein).toBeCloseTo(6.75, 2)
+    expect(m.kcal).toBeCloseTo(174, 6)
+    expect(m.protein).toBeCloseTo(6.61, 6) // 13,22 g/100 g
   })
   it('Mifflin-St Jeor: Mann 30 J., 180 cm, 80 kg → 1780 kcal', () => {
     expect(bmr('m', 30, 180, 80)).toBe(1780)
@@ -68,10 +73,12 @@ describe('Kalorien- und Makroberechnung', () => {
     const r = BUILTIN_RECIPES.find(x => x.id === 'r-ruehrei')!
     const withOil = recipeMacros(r, foods, { warm: 'olivenoel', cold: null })
     const noOil = recipeMacros(r, foods, { warm: null, cold: null })
-    expect(withOil.kcal - noOil.kcal).toBeCloseTo(44.2, 1)
-    expect(withOil.fat - noOil.fat).toBeCloseTo(5, 5)
+    // BLS 4.0, Q120000 „Olivenöl“: 899 kcal, 99,9 g Fett je 100 g → 5 g
+    expect(withOil.kcal - noOil.kcal).toBeCloseTo(44.95, 6)
+    expect(withOil.fat - noOil.fat).toBeCloseTo(4.995, 6)
     const butter = recipeMacros(r, foods, { warm: 'butter', cold: null })
-    expect(butter.kcal - noOil.kcal).toBeCloseTo(0.05 * 717 + 0.05 * 0.9 * 4 + 0.0005 * 4 * 0, 0)
+    // BLS 4.0, Q611000 „Butter mild gesäuert“: 747 kcal je 100 g → 5 g
+    expect(butter.kcal - noOil.kcal).toBeCloseTo(37.35, 6)
   })
   it('Portionsgröße: alle Nährwerte skalieren exakt mit dem Faktor', () => {
     const r = BUILTIN_RECIPES[0]

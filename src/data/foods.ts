@@ -1,7 +1,8 @@
+import blsMapped from './bls/mapped.json'
 import type { Allergen, AnimalOrigin, Category, Food, FoodGroup, OilProps, Prep } from '../domain/types'
 
 /** Bei jeder Änderung der eingebauten Daten erhöhen – frischt gespeicherte Standarddaten auf. */
-export const BUILTIN_DATA_VERSION = 2
+export const BUILTIN_DATA_VERSION = 3
 
 export const SOURCE_NOTE =
   'Gerundeter Richtwert in Anlehnung an USDA FoodData Central (Public Domain / CC0). Nicht einzeln gegen die Quelle geprüft.'
@@ -174,10 +175,34 @@ function prepOf(id: string, cat: Category, name: string): Prep {
   return 'roh'
 }
 
-export const BUILTIN_FOODS: Food[] = ROWS.map(([id, name, category, kcal, protein, carbs, fat, fiber, allergens = [], animal = 'none', extra = {}]) => ({
-  id, name, category, kcal, protein, carbs, fat, fiber, allergens, traces: TRACES[id] ?? [], allergenInfoKnown: true, animal,
-  group: groupOf(id, category, animal), prep: prepOf(id, category, name),
-  source: SOURCE_NOTE, dataQuality: 'reference' as const,
-  sourceRef: { name: 'USDA FoodData Central (Näherungswert, nicht gegen die Quelle geprüft)', license: 'CC0 1.0 / Public Domain' },
-  ...extra,
-}))
+interface MappedEntry { code: string; blsName: string; rename: string | null; quality: 'verified' | 'missing'; v: Record<string, number | null>; flags: Record<string, string> }
+const MAPPED = blsMapped.foods as unknown as Record<string, MappedEntry>
+export const BLS_META = blsMapped.meta
+
+export const BUILTIN_FOODS: Food[] = ROWS.map(([id, name, category, kcal, protein, carbs, fat, fiber, allergens = [], animal = 'none', extra = {}]) => {
+  const base: Food = {
+    id, name, category, kcal, protein,
+    // Richtwerte stammen aus „Kohlenhydrate inkl. Ballaststoffe“ → auf verfügbare Kohlenhydrate (ohne Ballaststoffe) umgerechnet
+    carbs: Math.max(0, Math.round((carbs - fiber) * 10) / 10), fat, fiber, allergens, traces: TRACES[id] ?? [], allergenInfoKnown: true, animal,
+    group: groupOf(id, category, animal), prep: prepOf(id, category, name),
+    source: SOURCE_NOTE, dataQuality: 'reference' as const,
+    sourceRef: { name: 'USDA FoodData Central (Näherungswert, nicht gegen die Quelle geprüft)', license: 'CC0 1.0 / Public Domain' },
+    ...extra,
+  }
+  const m = MAPPED[id]
+  if (!m) return base
+  // Mapped-Lebensmittel nehmen Nährwerte AUSSCHLIESSLICH aus BLS; fehlende Werte werden nicht aus anderen Quellen ergänzt.
+  const missingFields = (['kcal', 'protein', 'fat', 'carbs', 'fiber'] as const).filter(k => m.v[k] === null)
+  const micros: Food['micros'] = {}
+  for (const [k, v] of Object.entries(m.v)) if (!['kcal', 'protein', 'fat', 'carbs', 'fiber'].includes(k) && v !== null) (micros as Record<string, number>)[k] = v
+  return {
+    ...base,
+    name: m.rename ?? base.name,
+    kcal: m.v.kcal ?? 0, protein: m.v.protein ?? 0, carbs: m.v.carbs ?? 0, fat: m.v.fat ?? 0, fiber: m.v.fiber ?? 0,
+    missingFields: missingFields.length ? [...missingFields] : undefined,
+    micros: Object.keys(micros).length ? micros : undefined,
+    source: `${BLS_META.dataset} ${BLS_META.version}, Code ${m.code} („${m.blsName}“)`,
+    dataQuality: m.quality === 'verified' ? 'verified' : 'missing',
+    sourceRef: { name: `${BLS_META.dataset} ${BLS_META.version}`, id: m.code, license: BLS_META.license, retrieved: BLS_META.retrieved },
+  }
+})

@@ -33,7 +33,8 @@ export interface DietDef {
 
 export type Relation = { level: 'conflict' | 'tension' | 'info'; text: string }
 
-const netCarbPct = (m: Macros) => (m.kcal > 0 ? (Math.max(0, m.carbs - m.fiber) * 4 * 100) / m.kcal : 0)
+/** carbs sind bereits verfügbare Kohlenhydrate (ohne Ballaststoffe) = „Netto-Kohlenhydrate“ */
+const netCarbPct = (m: Macros) => (m.kcal > 0 ? (m.carbs * 4 * 100) / m.kcal : 0)
 const share = (m: Macros) => {
   const e = m.protein * 4 + m.carbs * 4 + m.fat * 9
   return e > 0 ? { protein: (m.protein * 400) / e, carbs: (m.carbs * 400) / e, fat: (m.fat * 900) / e } : { protein: 0, carbs: 0, fat: 0 }
@@ -64,13 +65,13 @@ registerDiet({
 registerDiet({
   id: 'vegetarisch', label: 'Vegetarisch', summary: 'Kein Fleisch und kein Fisch; Milchprodukte und Eier erlaubt.', implies: ['pescetarisch'],
   definition: ['Ausgeschlossen: Fleisch, Fisch, Meeresfrüchte', 'Erlaubt: Milchprodukte, Eier, Honig', NOTE_NEUTRAL],
-  foodRule: f => (f.animal === 'meat' || f.animal === 'fish' ? `${f.name} ist nicht vegetarisch` : null),
+  foodRule: f => (f.animal === 'meat' || f.animal === 'fish' ? `${f.name} ist nicht vegetarisch` : f.animal === 'unknown' ? `${f.name}: Herkunft unbekannt (nicht sicher vegetarisch)` : null),
   gapNotes: ['Eisen und Zink aus pflanzlichen Quellen werden meist schlechter aufgenommen; auf ausreichende Zufuhr achten.'],
 })
 registerDiet({
   id: 'pescetarisch', label: 'Pescetarisch', summary: 'Kein Fleisch; Fisch, Meeresfrüchte, Milchprodukte und Eier erlaubt.',
   definition: ['Ausgeschlossen: Fleisch', 'Erlaubt: Fisch, Meeresfrüchte, Milchprodukte, Eier', NOTE_NEUTRAL],
-  foodRule: f => (f.animal === 'meat' ? `${f.name} ist Fleisch (nicht pescetarisch)` : null),
+  foodRule: f => (f.animal === 'meat' ? `${f.name} ist Fleisch (nicht pescetarisch)` : f.animal === 'unknown' ? `${f.name}: Herkunft unbekannt (nicht sicher pescetarisch)` : null),
   gapNotes: ['Bei großen Raubfischen (z. B. Thunfisch) auf mögliche Schadstoffbelastung und Abwechslung bei der Fischauswahl achten.'],
 })
 registerDiet({
@@ -82,8 +83,12 @@ registerDiet({
 registerDiet({
   id: 'carnivore', label: 'Carnivore', summary: 'Ausschließlich tierische Lebensmittel.',
   definition: ['Erlaubt: Fleisch, Fisch, Meeresfrüchte, Eier, Milchprodukte (inkl. Butter/Ghee), Wasser, Kaffee, Tee', 'Ausgeschlossen: sämtliche pflanzlichen Lebensmittel inkl. Pflanzenöle, Honig', 'Kochfett wird automatisch Butter oder Ghee', NOTE_NEUTRAL],
-  foodRule: f => (f.animal === 'honey' ? `${f.name} ist nicht carnivore-konform` :
-    f.animal !== 'none' || (f.group === 'getraenk' && f.kcal <= 5) ? null : `${f.name} ist pflanzlich (nicht carnivore)`),
+  foodRule: f => {
+    if (f.animal === 'honey') return `${f.name} ist nicht carnivore-konform`
+    if (f.animal === 'unknown') return `${f.name}: Herkunft unbekannt (nicht sicher carnivore-konform)`
+    if (f.animal !== 'none' || (f.group === 'getraenk' && f.kcal <= 5)) return null
+    return `${f.name} ist pflanzlich (nicht carnivore)`
+  },
   macroTarget: { protein: 30, carbs: 0, fat: 70 },
   gapNotes: [
     'Der Plan enthält keine pflanzlichen Lebensmittel und damit praktisch keine Ballaststoffe und keine pflanzlichen Vitamin-C-Quellen.',
@@ -92,7 +97,7 @@ registerDiet({
 })
 registerDiet({
   id: 'keto', label: 'Ketogen / Keto', summary: 'Sehr wenige Kohlenhydrate, hoher Fettanteil.', implies: ['lowcarb'],
-  definition: ['Rezeptregel: Netto-Kohlenhydrate (Kohlenhydrate − Ballaststoffe) höchstens 12 % der Rezeptenergie', 'Ausgeschlossen: Getreide, Zucker/Süßungsmittel', 'Orientierung Tagesverteilung ca. 20 % Eiweiß / 5 % Kohlenhydrate / 75 % Fett', NOTE_NEUTRAL],
+  definition: ['Rezeptregel: Netto-Kohlenhydrate (verfügbare Kohlenhydrate ohne Ballaststoffe) höchstens 12 % der Rezeptenergie', 'Ausgeschlossen: Getreide, Zucker/Süßungsmittel', 'Orientierung Tagesverteilung ca. 20 % Eiweiß / 5 % Kohlenhydrate / 75 % Fett', NOTE_NEUTRAL],
   foodRule: f => (f.group === 'getreide' || f.group === 'zucker' ? `${f.name} ist für Keto ungeeignet (${f.group === 'zucker' ? 'Zucker' : 'Getreide'})` : null),
   recipeRule: m => (netCarbPct(m) > 12 ? `Netto-Kohlenhydrate ${netCarbPct(m).toFixed(0)} % der Energie (Keto-Grenze 12 %)` : null),
   fit: (_r, m) => { const s = share(m); return s.fat >= 65 ? 1 : s.fat <= 40 ? 0 : (s.fat - 40) / 25 },

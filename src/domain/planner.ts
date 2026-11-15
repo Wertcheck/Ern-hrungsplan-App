@@ -387,7 +387,7 @@ export function analyzePlan(plan: Plan, ctx: PlanContext, mealCount: 3 | 4 | 5 =
   for (const b of bad) issues.push({ level: 'error', text: `Plan verletzt aktuelle Einstellungen – ${b}. Bitte Mahlzeit austauschen oder Plan neu generieren.` })
   for (const n of ctx.oilNotes) issues.push({ level: 'warn', text: n })
   if (ctx.prefs.styles.includes('keto') && nonEmpty.length) {
-    const avg = nonEmpty.reduce((s, d) => s + (Math.max(0, d.macros.carbs - d.macros.fiber) * 4 * 100) / d.macros.kcal, 0) / nonEmpty.length
+    const avg = nonEmpty.reduce((s, d) => s + (d.macros.carbs * 4 * 100) / d.macros.kcal, 0) / nonEmpty.length
     if (avg > 10) issues.push({ level: 'warn', text: `Keto: Netto-Kohlenhydrate im Durchschnitt ${avg.toFixed(0)} % der Energie (Orientierung ≤ 10 %).` })
   }
   if (repScore < 70) issues.push({ level: 'info', text: 'Wegen weniger passender Rezepte kommt es zu häufigen Wiederholungen. Mehr Lebensmittel zu erlauben oder eigene Rezepte zu ergänzen erhöht die Vielfalt.' })

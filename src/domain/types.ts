@@ -19,7 +19,8 @@ export const ALLERGEN_LABEL: Record<Allergen, string> = {
 }
 export const ALLERGENS = Object.keys(ALLERGEN_LABEL) as Allergen[]
 
-export type AnimalOrigin = 'none' | 'meat' | 'fish' | 'dairy' | 'egg' | 'honey'
+/** unknown = Herkunft nicht sicher bestimmbar (z. B. zusammengesetzte Lebensmittel) – gilt nie als vegan/vegetarisch/carnivore-sicher */
+export type AnimalOrigin = 'none' | 'meat' | 'fish' | 'dairy' | 'egg' | 'honey' | 'unknown'
 
 export interface OilProps {
   warmOk: boolean
@@ -47,7 +48,7 @@ export const GROUP_LABEL: Record<FoodGroup, string> = {
 /** verified = gegen Originalquelle geprüft; reference = gerundeter Richtwert (nicht geprüft); user = eigene Angabe; missing = Wert fehlt */
 export type DataQuality = 'verified' | 'reference' | 'user' | 'missing'
 export const QUALITY_LABEL: Record<DataQuality, string> = {
-  verified: 'Verifiziert', reference: 'Richtwert (nicht verifiziert)', user: 'Eigene Angabe', missing: 'Daten fehlen',
+  verified: 'Verifiziert (Originalquelle)', reference: 'Richtwert (nicht verifiziert)', user: 'Eigene Angabe', missing: 'Daten fehlen',
 }
 
 export const MICRO_KEYS = ['calcium', 'magnesium', 'kalium', 'eisen', 'zink', 'vitaminA', 'vitaminB12', 'vitaminC', 'vitaminD', 'vitaminE', 'folat'] as const
@@ -65,7 +66,7 @@ export interface Food {
   id: string
   name: string
   category: Category
-  /** Nährwerte pro 100 g */
+  /** Nährwerte pro 100 g; carbs = verfügbare Kohlenhydrate OHNE Ballaststoffe (BLS-/EU-Kennzeichnungsdefinition) */
   kcal: number
   protein: number
   carbs: number
@@ -89,6 +90,8 @@ export interface Food {
   oil?: OilProps
   /** Mikronährstoffe pro 100 g; fehlende Schlüssel = keine Daten (nie 0 annehmen) */
   micros?: Partial<Record<MicroKey, number>>
+  /** Nährwertfelder, für die die Quelle keinen Wert liefert (im Modell als 0 geführt, in der Anzeige als „keine Daten“) */
+  missingFields?: string[]
   source: string
   sourceRef?: SourceRef
   dataQuality: DataQuality
