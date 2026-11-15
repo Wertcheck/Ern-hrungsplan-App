@@ -21,7 +21,9 @@
 <script type="module">
 const R={schema:'ernaehrungsplan-llm-proto-v1',note:'Alle Werte auf diesem Gerät gemessen; nicht gemessen = fehlt.',time:new Date().toISOString(),runs:[]}
 const $=id=>document.getElementById(id),out=$('out'),st=$('st')
-const show=()=>{out.textContent=JSON.stringify(R,null,2)}
+const KEY='llm-proto-last'
+const show=()=>{const t=JSON.stringify(R,null,2);out.textContent=t;try{localStorage.setItem(KEY,t)}catch(e){}}
+try{const prev=localStorage.getItem(KEY);if(prev){R.previousPageState=JSON.parse(prev);R.previousPageState.note='Zustand vor dem letzten Neuladen/Absturz dieser Seite'}}catch(e){}
 const bat=async()=>{try{const b=await navigator.getBattery();return +b.level.toFixed(2)}catch(e){return null}}
 const SYSTEM=`Du bist ein Befehlserkenner für eine Ernährungsplaner-App. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt.
 Erlaubte Aktionen:
@@ -53,7 +55,9 @@ $('load').onclick=async()=>{
  }catch(e){R.load={error:String(e&&e.message||e),model:id};st.textContent='Fehler beim Laden (auch das ist ein Messergebnis).';$('load').disabled=false}
  show()}
 $('run').onclick=async()=>{
- $('run').disabled=true;R.runs=[];R.runStart={battery:await bat()}
+ if(!engine){st.textContent='Erst „1. Modell laden“ ausführen.';return}
+ $('run').disabled=true;R.runs=[];R.runStart={battery:await bat(),at:new Date().toISOString()};show()
+ try{
  for(const [text,check] of TESTS){
   st.textContent='Test: '+text;const t0=performance.now();let ttft=null,acc='',usage=null,err=null
   try{
@@ -64,6 +68,7 @@ $('run').onclick=async()=>{
   try{parsed=JSON.parse(acc);valid=true;correct=!!check(parsed)}catch(e){}
   R.runs.push({input:text,output:acc,validJson:valid,correctAction:correct,ttft_ms:ttft===null?null:Math.round(ttft),total_ms:Math.round(total),prefill_tps:usage?.extra?.prefill_tokens_per_s??null,decode_tps:usage?.extra?.decode_tokens_per_s??null,tokens:usage?.completion_tokens??null,error:err})
   show()}
+ }catch(e){R.runError=String(e&&e.message||e);show()}
  R.summary={tests:R.runs.length,validJson:R.runs.filter(r=>r.validJson).length,correct:R.runs.filter(r=>r.correctAction).length,note:'Nur 6 feste Sätze: eine Stichprobe, KEINE Aussage über Genauigkeit im Alltag.'}
  R.runEnd={battery:await bat()};st.textContent='Fertig: '+R.summary.correct+'/'+R.summary.tests+' korrekt.';$('run').disabled=false;show()}
 $('copy').onclick=()=>navigator.clipboard?.writeText(JSON.stringify(R,null,2)).then(()=>alert('Kopiert'),()=>alert('Kopieren nicht möglich – „Als Datei speichern“.'))
