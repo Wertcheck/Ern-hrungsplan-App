@@ -141,6 +141,7 @@ export function parseCommands(raw: string, input: NluInput): NluResult {
   for (const c of splitClauses(raw)) {
     const r = parseClause(c, input)
     if (r.kind === 'refuse') return r
+    if (r.kind === 'undo') return r
     if (r.kind === 'commands') { commands.push(...r.commands); notes.push(...r.notes) }
     else if (r.kind === 'clarify') { clarify ??= { ...r, notes: [...r.notes] }; }
     else unparsed.push(c)
@@ -164,6 +165,13 @@ function parseClause(c: string, { state, today }: NluInput): NluResult {
 
   // Fragen sind keine Befehle
   if (/^(was|wie|welche[rs]?|wann|warum|wieso|wo|erklare|zeig)\b/.test(c)) return none
+
+  // ---- „wieder auf den bisherigen Wert“: nur eindeutig, sonst Rückfrage (nie raten)
+  if (/(kalorienziel|tagesziel|kalorien|kcal)/.test(c) && /(wieder|zuruck)/.test(c) && /(bisherig|vorherig|fruher|alten|ursprunglich)/.test(c)) {
+    const last = [...state.changeLog].reverse().find(e => !e.undone)
+    if (last && /kalorienziel|tagesziel/i.test(last.label)) return { kind: 'undo' }
+    return { kind: 'clarify', question: last ? `Die letzte Änderung („${last.label}“) betrifft nicht das Kalorienziel. Ich setze nichts zurück, solange unklar ist, was gemeint ist. Nenne den gewünschten Wert (z. B. „Setze mein Kalorienziel auf 2.200“) oder sage „Mach das rückgängig“ für die letzte Änderung.` : 'Es gibt keine gespeicherte frühere Änderung des Kalorienziels. Nenne den gewünschten Wert, dann setze ich ihn.', options: [], notes: [] }
+  }
 
   // ---- Makroziele (vor Kalorien)
   const macroWords: [RegExp, 'protein_g' | 'carbs_g' | 'fat_g'][] = [[/protein\w*|eiweiss\w*/, 'protein_g'], [/kohlenhydrat\w*|carbs/, 'carbs_g'], [/\bfett\w*/, 'fat_g']]
@@ -216,6 +224,10 @@ function parseClause(c: string, { state, today }: NluInput): NluResult {
 
   // ---- Ernährungsformen
   const diets = DIETS.filter(([rx]) => rx.test(c)).map(([, s]) => s)
+  if (diets.length && (when.kind === 'date' || when.kind === 'today') && /(ich (moechte|mochte|will|esse)|nur)/.test(c) && !/(rezept|tausche|ersetze)/.test(c))
+    return { kind: 'clarify', question: `Ernährungsweisen gelten bei mir dauerhaft – für nur ${when.kind === 'today' ? 'heute' : 'einen Tag'} gibt es das nicht. Soll ich dauerhaft auf ${diets.map(d => STYLE_LABEL[d]).join(' + ')} umstellen (der Plan wird ab heute neu berechnet)?`, options: [{ label: `Dauerhaft ${diets.map(d => STYLE_LABEL[d]).join(' + ')}`, commands: [{ type: 'set_diets', styles: diets, mode: 'set' }] }], notes: [] }
+  if (diets.length && when.kind === 'none' && /\bich (moechte|mochte|will)\b.*\bessen\b/.test(c) && !/(rezept|tausche|ersetze|kcal|kalorien)/.test(c))
+    return { kind: 'commands', commands: [{ type: 'set_diets', styles: diets, mode: 'set' }], notes: [] }
   if (diets.length && /(ich esse|ernahre mich|stelle .* um|wechsle|wechsel|umstellen|ab jetzt|nur noch|zusatzlich|kombiniere|fuge .* hinzu|fuege .* hinzu|nicht mehr|entferne|deaktiviere|ohne|aktiviere|ernahrungsform|ernahrungsweise)/.test(c) && !/rezept|tausche|ersetze/.test(c)) {
     const mode = /(nicht mehr|entferne|deaktiviere|streiche|ohne mehr)/.test(c) ? 'remove' : /(zusatzlich|zusaetzlich|auch|kombiniere|dazu|hinzu|noch)/.test(c) ? 'add' : 'set'
     return { kind: 'commands', commands: [{ type: 'set_diets', styles: diets, mode }], notes: [] }
@@ -244,12 +256,7 @@ function parseClause(c: string, { state, today }: NluInput): NluResult {
     const day = plan?.days.find(d => d.date === date)
     if (/(tausche|ersetze|wechsle|aendere|andere|anderes|alternative)/.test(c) && /(tausch|ersetz|wechsl|alternativ|anders|aender|ander)/.test(c)) {
       if (!plan || !day) return { kind: 'clarify', question: plan ? `Für ${date} gibt es keinen Plan. Welcher Tag ist gemeint?` : 'Es gibt noch keinen Plan.', options: [], notes: [] }
-      const meal = day.meals.find(m => m.slot === slot) ?? (slot ? undefined : day.meals[0])
-      if (!meal) return { kind: 'clarify', question: `Am ${date} gibt es kein ${slot ? SLOT_LABEL[slot] : 'Gericht'} im Plan.`, options: [], notes: [] }
-      const ctx = buildContext(state.foods, state.recipes, state.prefs), kc = mealMacros(meal, ctx.recipes, ctx.foods, ctx.oils).kcal
-      const alts = alternativesFor(meal.slot, kc, ctx, [meal.recipeId], 3)
-      if (!alts.length) return { kind: 'clarify', question: 'Mit deinen Einstellungen gibt es keine passende Alternative.', options: [], notes: [] }
-      return { kind: 'clarify', question: `Wodurch soll ${ctx.recipes.get(meal.recipeId)?.name} (${SLOT_LABEL[meal.slot]}, ${date}) ersetzt werden?`, options: alts.map(a => ({ label: `${a.recipe.name} (≈ ${Math.round(a.kcal)} kcal)`, commands: [{ type: 'swap_meal', date, meal_id: meal.id, recipe_id: a.recipe.id }] })), notes: [] }
+      return swapOptions(state, date, slot, /(proteinreich|eiweissreich|high protein|mehr protein|mehr eiweiss)/.test(c) ? 'protein' : undefined)
     }
     if (/(loesche|losche|entferne|streiche|lass .* weg)/.test(c) && day) { const meal = day.meals.find(m => m.slot === slot); if (meal) return { kind: 'commands', commands: [{ type: 'remove_meal', date, meal_id: meal.id }], notes: [] } }
     if (/(fuge|fuege|ergaenze|erganze).*(hinzu)|noch (ein|einen|eine)/.test(c) && slot && day) {
@@ -285,6 +292,8 @@ function parseClause(c: string, { state, today }: NluInput): NluResult {
 
   // ---- Lebensmittel-Präferenzen
   const pref = (() => {
+    const rm = c.match(/(?:entferne|streiche|nimm|loesche|losche)\s+(.+?)\s+(?:aus|von)\s+(?:meinen|meiner|den|der|die)\s+(bevorzugt\w*|favorit\w*)/)
+    if (rm) return { p: (rm[2].startsWith('favorit') ? 'unfavorite' : 'not_preferred') as 'unfavorite' | 'not_preferred', name: rm[1] }
     const ex = c.match(/(?:schliesse|schliess)\s+(.+?)\s+aus\b|\bich (?:mag|esse) (?:kein|keine|keinen|keinem)\s+(.+?)(?:\s+mehr)?$|\bohne\s+(.+)$|\b(?:streiche|sperre)\s+(.+?)\s+(?:aus dem plan|vom plan)/)
     if (ex) return { p: 'excluded' as const, name: ex[1] ?? ex[2] ?? ex[3] ?? ex[4] }
     const pf = c.match(/(?:bevorzuge|bevorzuge mehr|mehr von|ich mag)\s+(?:bitte\s+)?(?:mehr\s+)?(.+?)(?:\s+besonders|\s+gerne|\s+sehr)?$/)
@@ -312,6 +321,21 @@ function parseClause(c: string, { state, today }: NluInput): NluResult {
 
 const whenNote = (_: When) => ''
 const titleCase = (s: string) => s.split(' ').map(w => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ')
+
+/** Austausch-Vorschläge für eine Mahlzeit (Engine-geprüft erst bei Auswahl). `focus:'protein'` sortiert nach Eiweißdichte. */
+export function swapOptions(state: AppState, date: string, slot: MealSlot | undefined, focus?: 'protein'): NluResult {
+  const plan = state.plan, day = plan?.days.find(d => d.date === date)
+  if (!plan || !day) return { kind: 'clarify', question: plan ? `Für ${date} gibt es keinen Plan. Welcher Tag ist gemeint?` : 'Es gibt noch keinen Plan.', options: [], notes: [] }
+  const meal = day.meals.find(m => m.slot === slot) ?? (slot ? undefined : day.meals[0])
+  if (!meal) return { kind: 'clarify', question: `Am ${date} gibt es kein ${slot ? SLOT_LABEL[slot] : 'Gericht'} im Plan.`, options: [], notes: [] }
+  const ctx = buildContext(state.foods, state.recipes, state.prefs), kc = mealMacros(meal, ctx.recipes, ctx.foods, ctx.oils).kcal
+  const wantProtein = focus === 'protein'
+  const alts = wantProtein
+    ? alternativesFor(meal.slot, kc, ctx, [meal.recipeId], 14).map(a => ({ ...a, pd: (ctx.base.get(a.recipe.id)?.protein ?? 0) / Math.max(1, ctx.base.get(a.recipe.id)?.kcal ?? 1) })).sort((a, b) => b.pd - a.pd).slice(0, 3)
+    : alternativesFor(meal.slot, kc, ctx, [meal.recipeId], 3)
+  if (!alts.length) return { kind: 'clarify', question: 'Mit deinen Einstellungen gibt es keine passende Alternative.', options: [], notes: [] }
+  return { kind: 'clarify', question: `Wodurch soll ${ctx.recipes.get(meal.recipeId)?.name} (${SLOT_LABEL[meal.slot]}, ${date}) ersetzt werden?${wantProtein ? ' (eiweißreichste Varianten zuerst)' : ''}`, options: alts.map(a => ({ label: `${a.recipe.name} (≈ ${Math.round(a.kcal)} kcal${wantProtein ? `, ${Math.round((ctx.base.get(a.recipe.id)?.protein ?? 0) * a.factor)} g Eiweiß` : ''})`, commands: [{ type: 'swap_meal', date, meal_id: meal.id, recipe_id: a.recipe.id }] })), notes: [] }
+}
 
 /** Antwort auf eine Rückfrage (z. B. „3000“ nach „Auf wie viele Kalorien …?“). */
 export function followUp(pending: Pending, text: string, input: NluInput): NluResult {

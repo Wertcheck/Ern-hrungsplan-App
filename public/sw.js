@@ -1,6 +1,6 @@
 /* Service Worker: App-Hülle wird beim Installieren vorab gecacht (offlinefähig), Daten liegen lokal (localStorage).
    /api (KI-Backend) wird NIE gecacht. Bei Änderungen am Caching-Verhalten VERSION erhöhen. */
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL = 'ep-shell-' + VERSION;
 const RUNTIME = 'ep-runtime-' + VERSION;
 const CORE = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png', '/apple-touch-icon.png'];
@@ -38,6 +38,9 @@ self.addEventListener('fetch', e => {
   const req = e.request, url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== location.origin) return;
   if (url.pathname.startsWith('/api/')) return; // KI-/Backend-Anfragen niemals cachen
+
+  // Eigenständige Werkzeugseiten (Geräte-Probe, Modell-Benchmark) sind nicht die App: nie als App-Hülle cachen
+  if (req.mode === 'navigate' && /\.html$/.test(url.pathname) && url.pathname !== '/index.html') return;
 
   // Seitennavigation: Netzwerk zuerst, offline die gecachte App-Hülle (SPA)
   if (req.mode === 'navigate') {
