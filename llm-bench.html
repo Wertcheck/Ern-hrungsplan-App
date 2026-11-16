@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lokales Modell – Benchmark</title>
+<style>body{font:16px system-ui,sans-serif;margin:0;padding:16px;background:#f7f4ec;color:#1f2a1f}button{font:inherit;padding:12px 14px;margin:6px 6px 6px 0;border-radius:14px;border:1px solid #2f5d3a;background:#2f5d3a;color:#fff}button.alt{background:#fff;color:#2f5d3a}button:disabled{opacity:.5}label{display:block;margin:4px 0}input[type=text]{font:inherit;padding:8px;border-radius:10px;border:1px solid #bbb;width:9em}pre{background:#fff;border:1px solid #d9d2bd;border-radius:12px;padding:10px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:45vh;overflow:auto}h1{font-size:20px}h2{font-size:16px;margin:14px 0 4px}p,.n{line-height:1.45}.n{font-size:13px;color:#555}progress{width:100%}</style></head>
+<body>
+<h1>Lokales Modell (WebGPU) – Benchmark</h1>
+<p class="n"><b>Messwerkzeug, nicht Teil der App.</b> Lädt die Bibliothek <code>@mlc-ai/web-llm</code> (fest gepinnt) von <code>cdn.jsdelivr.net</code> und die gewählten Modelle von <code>huggingface.co</code> (einmalig ca. 0,9 bzw. 1,6 GB – <b>nur im WLAN</b>; danach im Browser-Cache). Es gehen keine Daten von dir ins Netz; die Testsätze sind fest eingebaut und werden lokal berechnet. Verwendet exakt den Code der App (Parser, Aktions-Engine, Engine-Host).</p>
+<h2>Vorher von Hand eintragen (nicht auslesbar)</h2>
+<label>Gerätetemperatur vorher (z. B. Thermometer-App): <input type="text" id="tbefore" placeholder="nicht gemessen"></label>
+<label>Gerätetemperatur nachher: <input type="text" id="tafter" placeholder="nicht gemessen"></label>
+<h2>Modelle</h2>
+<label><input type="checkbox" class="model" value="Llama-3.2-1B-Instruct-q4f16_1-MLC" checked> Llama 3.2 1B (Q4)</label>
+<label><input type="checkbox" class="model" value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC" checked> Qwen 2.5 1.5B (Q4)</label>
+<h2>Ausgabemodus</h2>
+<label><input type="checkbox" id="mgrammar" checked> Grammatik mit Schema (response_format json_object + schema-String)</label>
+<label><input type="checkbox" id="mprompt" checked> Nur Prompt + strenger Parser (ohne Grammatik)</label>
+<button id="bench">1. Benchmark starten</button>
+<button id="inject" class="alt">2. Fehlerinjektion (Ursachentest)</button>
+<button id="abort" class="alt" disabled>Abbrechen</button><br>
+<button id="copy" class="alt">Ergebnis kopieren</button><button id="dl" class="alt">Als Datei speichern</button>
+<progress id="pg" value="0" max="1" hidden></progress>
+<p id="st" class="n">Bereit.</p>
+<pre id="out">Noch nichts gemessen.</pre>
+<script type="module" src="/src/bench/bench.ts"></script>
+</body></html>
