@@ -25,7 +25,7 @@ export class HostError extends Error {
   constructor(public code: 'busy' | 'not_loaded' | 'aborted' | 'timeout' | 'engine' | 'recovery_failed' | 'disposed', message: string, public causeText?: string) { super(message); this.name = 'HostError' }
 }
 
-const TAINT = /disposed|device (was )?lost|out of memory|oom|grammar|abort(ed)? by|context lost|internal error|runtime error|unreachable/i
+const TAINT = /disposed|already deleted|mapasync|unmapped|device (was )?lost|[(\[]device[)\]] is lost|out of memory|oom|grammar|abort(ed)? by|context lost|internal error|runtime error|unreachable/i
 export const explain = (e: unknown): string => String((e as Error)?.message ?? e).slice(0, 300)
 
 export interface HostOptions { timeoutMs?: number; maxRecoveries?: number; now?: () => number }

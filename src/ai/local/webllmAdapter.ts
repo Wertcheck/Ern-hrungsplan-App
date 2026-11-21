@@ -11,6 +11,9 @@ export const WEBLLM_URL = `https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@${WEBLLM
 export const MODELS = [
   { id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC', label: 'Llama 3.2 1B (Q4)', vramMB: 879 },
   { id: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', label: 'Qwen 2.5 1.5B (Q4)', vramMB: 1630 },
+  // f32-Variante der Aktivierungen: Gegenprobe, falls f16 auf dem Adreno-Treiber Probleme macht (größer/langsamer)
+  { id: 'Llama-3.2-1B-Instruct-q4f32_1-MLC', label: 'Llama 3.2 1B (Q4, f32)', vramMB: 1129 },
+  { id: 'Qwen2.5-1.5B-Instruct-q4f32_1-MLC', label: 'Qwen 2.5 1.5B (Q4, f32)', vramMB: 1889 },
 ] as const
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,7 +29,7 @@ export const loadWebLlm = (url = WEBLLM_URL): Promise<Any> => {
 export interface RawChatOptions extends ChatOptions { responseFormatOverride?: unknown }
 
 class WebLlmEngine implements LlmEngine {
-  constructor(private engine: Any) {}
+  constructor(private engine: Any, private worker?: Worker) {}
   async chat(messages: ChatMessage[], opts: RawChatOptions): Promise<{ text: string; stats: ChatStats }> {
     await this.engine.resetChat() // jede Anfrage startet ohne Rest des vorherigen Chats
     const t0 = performance.now()
@@ -49,13 +52,24 @@ class WebLlmEngine implements LlmEngine {
   }
   async resetChat() { await this.engine.resetChat() }
   interrupt() { this.engine.interruptGenerate() }
-  async unload() { await this.engine.unload() }
+  async unload() {
+    // Im Worker-Betrieb wird der Worker immer beendet: das gibt WASM-Zustand (Tokenizer, Grammatik) und GPU-Gerät frei, auch wenn unload() scheitert
+    try { await Promise.race([this.engine.unload(), new Promise((_r, rej) => setTimeout(() => rej(new Error('unload: Zeitüberschreitung')), 5000))]) }
+    finally { this.worker?.terminate() }
+  }
 }
 
-export const webllmFactory = (url = WEBLLM_URL): EngineFactory => async (modelId, onProgress) => {
+const workerSource = (url: string) => `import { WebWorkerMLCEngineHandler } from ${JSON.stringify(url)};\nconst handler = new WebWorkerMLCEngineHandler();\nself.onmessage = (m) => handler.onmessage(m);`
+
+/** `worker:true` führt die Engine in einem eigenen Web Worker aus: Wiederherstellung = Worker beenden + neuen starten (echte Isolation). */
+export const webllmFactory = (url = WEBLLM_URL, o: { worker?: boolean } = {}): EngineFactory => async (modelId, onProgress) => {
   if (!('gpu' in navigator)) throw new Error('WebGPU ist in diesem Browser nicht verfügbar.')
   const lib = await loadWebLlm(url)
-  const engine = await lib.CreateMLCEngine(modelId, { initProgressCallback: (p: { progress?: number; text?: string }) => onProgress?.({ progress: p.progress ?? 0, text: p.text ?? '' }) })
-  return new WebLlmEngine(engine)
+  const cfg = { initProgressCallback: (p: { progress?: number; text?: string }) => onProgress?.({ progress: p.progress ?? 0, text: p.text ?? '' }) }
+  if (!o.worker) return new WebLlmEngine(await lib.CreateMLCEngine(modelId, cfg))
+  const blobUrl = URL.createObjectURL(new Blob([workerSource(url)], { type: 'text/javascript' }))
+  const worker = new Worker(blobUrl, { type: 'module' })
+  try { return new WebLlmEngine(await lib.CreateWebWorkerMLCEngine(worker, modelId, cfg), worker) }
+  catch (e) { worker.terminate(); throw e } finally { URL.revokeObjectURL(blobUrl) }
 }
 export const isModelCached = async (modelId: string, url = WEBLLM_URL): Promise<boolean | null> => { try { const lib = await loadWebLlm(url); return await lib.hasModelInCache(modelId) } catch { return null } }

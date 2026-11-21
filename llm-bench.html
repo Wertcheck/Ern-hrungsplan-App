@@ -8,12 +8,16 @@
 <h2>Modelle</h2>
 <label><input type="checkbox" class="model" value="Llama-3.2-1B-Instruct-q4f16_1-MLC" checked> Llama 3.2 1B (Q4)</label>
 <label><input type="checkbox" class="model" value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC" checked> Qwen 2.5 1.5B (Q4)</label>
-<h2>Ausgabemodus</h2>
-<label><input type="checkbox" id="mgrammar" checked> Grammatik mit Schema (response_format json_object + schema-String)</label>
+<label><input type="checkbox" class="model" value="Llama-3.2-1B-Instruct-q4f32_1-MLC"> Llama 3.2 1B (Q4, f32) – Gegenprobe, ca. 1,1 GB zusätzlicher Download</label>
+<label><input type="checkbox" class="model" value="Qwen2.5-1.5B-Instruct-q4f32_1-MLC"> Qwen 2.5 1.5B (Q4, f32) – Gegenprobe, ca. 1,9 GB zusätzlicher Download</label>
+<h2>Ausgabemodus (nach dem Smoke-Test, der immer zuerst läuft)</h2>
 <label><input type="checkbox" id="mprompt" checked> Nur Prompt + strenger Parser (ohne Grammatik)</label>
+<label><input type="checkbox" id="mgrammar" checked> Grammatik mit Schema (response_format json_object + schema-String)</label>
+<label><input type="checkbox" id="useworker" checked> In eigenem Web Worker ausführen (empfohlen)</label>
+<p class="n">Jede Konfiguration läuft in einer <b>frischen Seite</b> (die Seite lädt sich selbst neu – das ist gewollt). Der Stand bleibt bei Neuladen oder Absturz erhalten.</p>
 <button id="bench">1. Benchmark starten</button>
-<button id="inject" class="alt">2. Fehlerinjektion (Ursachentest)</button>
-<button id="abort" class="alt" disabled>Abbrechen</button><br>
+<button id="inject" class="alt">2. Ursachentest (Fehlerinjektion)</button>
+<button id="abort" class="alt" disabled>Abbrechen</button><button id="reset" class="alt">Ergebnisse löschen</button><br>
 <button id="copy" class="alt">Ergebnis kopieren</button><button id="dl" class="alt">Als Datei speichern</button>
 <progress id="pg" value="0" max="1" hidden></progress>
 <p id="st" class="n">Bereit.</p>
