@@ -95,3 +95,27 @@ Datei `llm-bench-s23.json` (Benchmark v2, WebLLM 0.2.88, beide Modelle aus dem C
 3. Wiederherstellung per frischem Worker: Hypothese, noch nicht auf dem Gerät belegt.
 4. Fehler 2 (`disposed`): jetzt als „Zustand des Hauptthreads nach Fehler irreparabel“ beschrieben; die genaue interne Ursache bleibt Hypothese.
 5. Punkte 2–5 aus Abschnitt 8 unverändert.
+
+
+## 11. Messlauf 2 auf dem S23 Ultra (2026-11-21, Benchmark v3.1) – Auswertung
+Hauptthread-Betrieb (Web Worker startete in dieser Seite nicht), Akku 37–39 %, Temperatur nicht messbar.
+
+**Gesichert gemessen**
+| Befund | Wert |
+|---|---|
+| Web Worker | Der Blob-Modul-Worker startet auf dieser Seite **nicht** („Skriptfehler“, Import/CSP/Herkunft) – bei allen Konfigurationen sofort (≈ 20 ms). Alle Läufe liefen im Hauptthread (`main-fallback`). **Worker-Isolation ist damit weiter ungemessen.** |
+| Erste erfolgreiche Inferenz | Qwen 2.5 1.5B (Q4, f16), Hauptthread, ohne Grammatik: Aufruf 1 und 2 liefen durch. |
+| Geschwindigkeit | Decode **0,50 und 0,51 Tokens/s**; Prefill 1,0 und 7,5 Tokens/s; Zeit bis zum ersten Token 27,8 s bzw. 3,7 s; 8 Tokens in 42,0 s bzw. 17,5 s. Das ist für Alltagsnutzung **unbrauchbar** (eine Antwort mit 40 Tokens ≈ 80 s). |
+| Ausgabequalität | Antwort auf „Antworte nur mit dem Wort ok.“ war beide Male `OK Xu zh` – nach „OK“ folgen sinnlose Tokens statt Stopp. Möglicherweise numerische Fehler (z. B. f16) – **Ursache nicht bestimmt**. |
+| Stabilität | Aufruf 3 desselben Modells scheiterte wieder mit `mapAsync … Buffer was unmapped before mapping was resolved`; ebenso der Kontrollaufruf **ohne jede Grammatik** im Ursachentest (Llama, Fehler nach 23,6 s). Das GPU-Rücklese-Problem ist also **nicht grammatikspezifisch**. |
+| Folgen | Danach `Object has already been disposed` (Fehler 2) und selbst nach Neuladen im Hauptthread `A valid external Instance reference no longer exists`; Entladen: `Tokenizer instance already deleted`. |
+| Ladezeiten | Qwen (Cache) 7,8 s; Llama (Cache) wie zuvor ≈ 5 s. |
+| f32-Varianten | Download fehlgeschlagen (`Cache.add() … network error`, `Failed to fetch`) – **nicht gemessen** (Netzproblem, kein Modellbefund). |
+| Llama (f16) Smoke | Seite wurde während des Laufs beendet (als Absturz/Speicherdruck protokolliert) – Ursache nicht belegt. |
+
+**Einordnung (Hypothesen, nicht belegt)**
+- Entweder ist die WebGPU-Pipeline auf diesem Gerät/Chrome-Stand für diese Last zu langsam und instabil (Treiber-/Watchdog-Probleme, Drosselung), oder die Messbedingungen verfälschen (Akku 37–39 % – evtl. Energiesparmodus, Hintergrundlast, Hauptthread-Betrieb), oder web-llm 0.2.88 hat ein Problem mit diesem Adapter.
+- Der neue **GPU-Rohtest** (ohne Modell) trennt das: Rücklesen 200×, f16/f32-Rechenkorrektheit (exakt prüfbar), Durchsatz in GFLOPS und Dauerlast über 20 s (Drosselung). Im Software-Adapter des Entwicklungsrechners läuft er fehlerfrei (f32 korrekt, Rücklesen 200/200); der f16-Pfad ist dort mangels Unterstützung **ungeprüft**.
+
+## 12. Plattformentscheidung (Stand nach Messlauf 2, vorläufig)
+Noch **keine** Entscheidung für eine native Hülle, aber die Lage hat sich verschoben: Der PWA/WebLLM-Weg lädt Modelle, liefert auf diesem Gerät bisher aber nur 0,5 Tokens/s, fehlerhafte Ausgabe und instabile GPU-Zugriffe. Bevor das als Gerätegrenze gilt, ist der GPU-Rohtest unter fairen Bedingungen (Netzteil, Energiesparmodus aus, andere Apps geschlossen) auszuwerten. Ist der Rohdurchsatz hoch und fehlerfrei, liegt das Problem in web-llm (dann Gegenprobe mit anderer Version/Worker-Hosting); ist er niedrig oder fehlerhaft, ist WebGPU auf dem Gerät nicht tragfähig und eine native Laufzeit (CPU/NPU, z. B. llama.cpp oder LiteRT) wäre begründet. Die Regel-Erkennung (Tier 0, 14/14 Fälle) bleibt unabhängig davon der Hauptweg; die PWA bleibt unverändert.

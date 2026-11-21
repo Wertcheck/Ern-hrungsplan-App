@@ -10,11 +10,12 @@ import { CASES, CASE_TODAY, baseState, judge } from '../ai/local/cases'
 import { LlmEngineHost, type ChatMessage } from '../ai/local/host'
 import { LLM_JSON_SCHEMA, buildSystemPrompt, parseModelOutput } from '../ai/local/llmAction'
 import { interpret, toOutcome, type LocalOutcome } from '../ai/local/runner'
+import { runGpuProbe } from './gpuProbe'
 import { MODELS, WEBLLM_VERSION, isModelCached, lastIsolation, note, trace, webllmFactory, type RawChatOptions } from '../ai/local/webllmAdapter'
 
 type Mode = 'smoke' | 'prompt' | 'grammar'
 interface Cfg { model: string; mode: Mode; worker: boolean }
-interface Acc { startedAt: string; device: Record<string, unknown>; queue: Cfg[]; inFlight: Cfg | null; partial?: Record<string, unknown> | null; results: Record<string, unknown>[]; tier0?: unknown; injection?: unknown }
+interface Acc { gpuProbe?: unknown; startedAt: string; device: Record<string, unknown>; queue: Cfg[]; inFlight: Cfg | null; partial?: Record<string, unknown> | null; results: Record<string, unknown>[]; tier0?: unknown; injection?: unknown }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 const KEY = 'llm-bench-acc-v3'
@@ -30,7 +31,7 @@ const memory = async () => {
 }
 const avg = (xs: (number | null | undefined)[]) => { const v = xs.filter((x): x is number => typeof x === 'number'); return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null }
 const errText = (e: unknown) => String((e as Error)?.message ?? e)
-const setBusy = (b: boolean) => { for (const id of ['bench', 'inject', 'reset']) ($(id) as HTMLButtonElement).disabled = b; ($('abort') as HTMLButtonElement).disabled = !b }
+const setBusy = (b: boolean) => { for (const id of ['bench', 'inject', 'gpu', 'reset']) ($(id) as HTMLButtonElement).disabled = b; ($('abort') as HTMLButtonElement).disabled = !b }
 
 let acc: Acc | null = load()
 const sig = new AbortController()
@@ -172,6 +173,12 @@ async function injection() {
 
 $('bench').onclick = () => startBenchmark()
 $('inject').onclick = () => void injection().catch(e => { status(`Ursachentest-Fehler: ${errText(e)}`); setBusy(false) })
+$('gpu').onclick = () => void (async () => {
+  setBusy(true); acc = acc ?? { startedAt: new Date().toISOString(), device: { userAgent: navigator.userAgent }, queue: [], inFlight: null, results: [] }
+  acc.queue = []; acc.inFlight = null
+  try { acc.gpuProbe = await runGpuProbe(status) } catch (e) { acc.gpuProbe = { error: errText(e) } }
+  save(acc); status('GPU-Rohtest fertig.'); setBusy(false); view(acc)
+})()
 $('abort').onclick = () => { sig.abort(); if (acc) { acc.queue = []; save(acc) } status('Abbruch angefordert …') }
 $('reset').onclick = () => { try { localStorage.removeItem(KEY) } catch { /* ignorieren */ } acc = null; view(null); status('Ergebnisse gelöscht.') }
 $('copy').onclick = () => void navigator.clipboard?.writeText($('out').textContent ?? '').then(() => alert('Kopiert'), () => alert('Kopieren nicht möglich – „Als Datei speichern“.'))
