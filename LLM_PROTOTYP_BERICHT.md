@@ -46,15 +46,15 @@ Bewertet werden: Absichtserkennung, Parameter, gültiges JSON (erste Ausgabe / n
 | Llama 3.2 1B Q4 | lädt (Browser-Cache-Belegung ≈ 766 MB); Ladezeit 4,8–6,0 s – **aus dem Cache**, kein Download-Wert |
 | Qwen 2.5 1.5B Q4 | lädt (Belegung gesamt 1519 MB); erste Ladezeit 151 s (inkl. Download, WLAN); später 6,1 s aus dem Cache |
 | Funktionstests | 0/6 – **alle am Grammatikfehler (Fehler 1) bzw. dessen Folgefehler gescheitert**; damit **keine** Aussage zu Qualität, Latenz oder Tokens/s |
-| Nicht gemessen | Zeit bis zum ersten Token, Gesamtlaufzeit, Tokens/s, korrekte Aktionen, Akku-Verlauf (Batterie 54–56 % vorher; Nachwerte ohne Lauf = unverändert, wertlos), Temperatur (keine Browser-Schnittstelle), GPU-/RAM-Verbrauch (im Browser nicht messbar) |
+| Nicht gemessen | Zeit bis zum ersten Token, Gesamtlaufzeit, Tokens/s, korrekte Aktionen, Akku-Verlauf (Batterie 54–56 % vorher; Nachwerte ohne Lauf = unverändert, wertlos), Temperatur (nicht messbar: keine Schnittstelle, vom Nutzer bestätigt – wird nicht erhoben), GPU-/RAM-Verbrauch (im Browser nicht messbar) |
 
 Die Zahlen aus dem früheren Bericht „Ladezeit 5–6,5 s“ sind folglich **Cache-Ladezeiten**; die ehrliche Erstladung ist nur für Qwen belegt (151 s).
 
 ## 6. Benchmark-Durchführung (offen: braucht dich)
-1. `llm-bench-standalone.html` oder `/llm-bench.html` im Chrome des S23 öffnen (WLAN, Akku/Temperatur notieren).
+1. `llm-bench-standalone.html` oder `/llm-bench.html` im Chrome des S23 öffnen (WLAN, Akkustand notieren).
 2. **„2. Fehlerinjektion“** zuerst (≈ 2 Min.): zeigt Ursache 1 auf dem Gerät und welcher Wiederherstellungsweg funktioniert (Fehler 2).
 3. **„1. Benchmark starten“**: beide Modelle × (Grammatik mit Schema | nur Prompt) × 14 Fälle (≈ 15–30 Min., Bildschirm an, Tab im Vordergrund).
-4. Ergebnis-JSON zurückgeben. Pro Modell und Modus getrennt: Ladezeit (mit Cache-Hinweis), TTFT, Gesamtlaufzeit, Tokens/s, gültiges JSON (erste Antwort/nach Retry), korrekte Absicht/Parameter/Klasse, Akku vorher/nachher, JS-Heap/Storage; GPU-RAM und Temperatur als „nicht messbar“ bzw. manuell.
+4. Ergebnis-JSON zurückgeben. Pro Modell und Modus getrennt: Ladezeit (mit Cache-Hinweis), TTFT, Gesamtlaufzeit, Tokens/s, gültiges JSON (erste Antwort/nach Retry), korrekte Absicht/Parameter/Klasse, Akku vorher/nachher, JS-Heap/Storage; GPU-RAM und Temperatur sind „nicht messbar“ und bleiben es.
 
 ## 7. Plattformentscheidung (vorläufig – keine native Hülle gebaut)
 Es gibt **noch keinen funktionierenden, reproduzierbaren PWA-Benchmark**; deshalb **keine Entscheidung** für Capacitor oder native Laufzeit. Heute belegt: WebGPU, f16 und das Laden beider Modelle funktionieren in der PWA. Offen und entscheidend: Inferenzgeschwindigkeit, Zuverlässigkeit der Grammatik (Schema-Modus) und Stabilität über viele Läufe. Eine native Laufzeit lohnt erst, wenn die PWA-Werte zu langsam/instabil sind oder Offline-Spracherkennung gebraucht wird (Web-Spracherkennung läuft auf Android-Chrome typischerweise über Server). Die PWA bleibt unverändert.

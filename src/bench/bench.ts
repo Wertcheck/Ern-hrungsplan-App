@@ -30,7 +30,7 @@ async function benchmark() {
   if (!models.length || !modes.length) { status('Bitte mindestens ein Modell und einen Modus wählen.'); return }
   setBusy(true); ctl = new AbortController()
   R.device = { userAgent: navigator.userAgent, hardwareConcurrency: navigator.hardwareConcurrency, deviceMemoryGB_capped: (navigator as unknown as { deviceMemory?: number }).deviceMemory ?? null, webgpu: 'gpu' in navigator }
-  R.temperature = { before: ($('tbefore') as HTMLInputElement).value || 'nicht gemessen', after: 'siehe unten', note: 'Browser bieten keine Temperatur-Schnittstelle; nur manuelle Eingabe.' }
+  R.temperature = 'nicht messbar (keine Temperatur-Schnittstelle im Browser, vom Nutzer bestätigt)'
   R.tier0 = CASES.map(c => { const s = c.setup ? c.setup(baseState()) : baseState(); const r = parseCommands(c.text, { state: s, today: CASE_TODAY }); const o = toOutcome(r.kind === 'refuse' ? { kind: 'invalid', reason: r.text } : r, s, CASE_TODAY); const v = judge(o, c, s, s); return { id: c.id, ok: v.intent && v.params && v.cls && v.noUnwantedChange } })
   const results: Record<string, unknown>[] = []; R.models = results; show()
   try {
@@ -71,7 +71,6 @@ async function benchmark() {
       await host.dispose(); show()
     }
   } catch (e) { R.benchmarkError = String((e as Error).message ?? e) }
-  R.temperature = { ...(R.temperature as object), after: ($('tafter') as HTMLInputElement).value || 'nicht gemessen' }
   status(ctl.signal.aborted ? 'Abgebrochen (Teilergebnis gespeichert).' : 'Fertig.'); $('pg').hidden = true; setBusy(false); show()
 }
 
