@@ -10,7 +10,7 @@ import { CASES, CASE_TODAY, baseState, judge } from '../ai/local/cases'
 import { LlmEngineHost, type ChatMessage } from '../ai/local/host'
 import { LLM_JSON_SCHEMA, buildSystemPrompt, parseModelOutput } from '../ai/local/llmAction'
 import { interpret, toOutcome, type LocalOutcome } from '../ai/local/runner'
-import { MODELS, WEBLLM_VERSION, isModelCached, webllmFactory, type RawChatOptions } from '../ai/local/webllmAdapter'
+import { MODELS, WEBLLM_VERSION, isModelCached, lastIsolation, note, trace, webllmFactory, type RawChatOptions } from '../ai/local/webllmAdapter'
 
 type Mode = 'smoke' | 'prompt' | 'grammar'
 interface Cfg { model: string; mode: Mode; worker: boolean }
@@ -77,22 +77,30 @@ async function resume() {
 function finish() { setBusy(false); $('pg').hidden = true; status('Fertig.'); view(acc) }
 
 async function runConfig(cfg: Cfg): Promise<Record<string, unknown>> {
+  const r = await runConfigInner(cfg); r.isolationUsed = lastIsolation; r.trace = [...trace]; return r
+}
+async function runConfigInner(cfg: Cfg): Promise<Record<string, unknown>> {
   const entry: Record<string, unknown> = { model: cfg.model, mode: cfg.mode, worker: cfg.worker, startedAt: new Date().toISOString() }
+  note(`Konfiguration ${cfg.mode} · ${cfg.model} (Worker gewünscht: ${cfg.worker})`)
   entry.cachedBeforeLoad = await isModelCached(cfg.model); entry.batteryBefore = await battery()
   status(`${cfg.mode} · ${cfg.model}: lade …`); $('pg').hidden = false; let last = 0
-  const progress = (p: { progress: number; text: string }) => { ($('pg') as HTMLProgressElement).value = p.progress; if (performance.now() - last > 500) { last = performance.now(); status(p.text) } }
+  let lastProgressAt = performance.now()
+  const watch = setInterval(() => { const last = trace[trace.length - 1]; status(`${cfg.mode} · ${cfg.model}: ${Math.round((performance.now() - lastProgressAt) / 1000)} s ohne Fortschritt · letzte Phase: ${last?.msg ?? '–'}`); try { const a = load(); if (a) { a.partial = { ...(a.partial ?? {}), trace: [...trace] }; save(a) } } catch { /* ignorieren */ } }, 5000)
+  const progress = (p: { progress: number; text: string }) => { lastProgressAt = performance.now(); ($('pg') as HTMLProgressElement).value = p.progress; if (performance.now() - last > 500) { last = performance.now(); status(p.text) } }
   const factory = webllmFactory(undefined, { worker: cfg.worker })
+  const stopWatch = () => clearInterval(watch)
 
   if (cfg.mode === 'smoke') {
     const t0 = performance.now(); let eng
-    try { eng = await factory(cfg.model, progress) } catch (e) { return { ...entry, loadError: errText(e), smokeOk: false } }
+    try { eng = await factory(cfg.model, progress) } catch (e) { stopWatch(); return { ...entry, loadError: errText(e), smokeOk: false } }
+    stopWatch()
     entry.loadMs = Math.round(performance.now() - t0); entry.loadNote = entry.cachedBeforeLoad ? 'Modell war im Cache: Zeit enthält KEINEN Download.' : entry.cachedBeforeLoad === false ? 'Erstladung inkl. Download.' : 'Cache-Status unbekannt.'
     entry.memoryAfterLoad = await memory()
     const calls: Record<string, unknown>[] = []
     for (let i = 0; i < 3; i++) {
       status(`Smoke ${i + 1}/3 (einfache Generierung, ohne Grammatik) …`)
       const msgs: ChatMessage[] = [{ role: 'user', content: 'Antworte nur mit dem Wort ok.' }]
-      try { const r = await eng.chat(msgs, { maxTokens: 8 }); calls.push({ ok: true, text: r.text, ...r.stats }) } catch (e) { calls.push({ ok: false, error: errText(e) }); break }
+      try { const r = await Promise.race([eng.chat(msgs, { maxTokens: 8 }), new Promise<never>((_r, rej) => setTimeout(() => rej(new Error('Smoke: keine Antwort nach 90 s (Inferenz hängt)')), 90_000))]); calls.push({ ok: true, text: r.text, ...r.stats }) } catch (e) { calls.push({ ok: false, error: errText(e) }); break }
     }
     entry.calls = calls; entry.smokeOk = calls.length === 3 && calls.every(c => c.ok === true)
     try { await eng.unload() } catch (e) { entry.unloadError = errText(e) }
@@ -100,7 +108,8 @@ async function runConfig(cfg: Cfg): Promise<Record<string, unknown>> {
   }
 
   const host = new LlmEngineHost(factory, { timeoutMs: 120_000 })
-  try { await host.load(cfg.model, progress) } catch (e) { return { ...entry, loadError: errText(e) } }
+  try { await host.load(cfg.model, progress) } catch (e) { stopWatch(); return { ...entry, loadError: errText(e) } }
+  stopWatch()
   entry.loadMs = host.loadMs; entry.loadNote = entry.cachedBeforeLoad ? 'Modell war im Cache: Zeit enthält KEINEN Download.' : entry.cachedBeforeLoad === false ? 'Erstladung inkl. Download.' : 'Cache-Status unbekannt.'
   entry.memoryAfterLoad = await memory()
   const runs: Record<string, unknown>[] = []; entry.runs = runs; const t0 = performance.now()
@@ -139,7 +148,7 @@ async function injection() {
   const step = async (name: string, f: () => Promise<unknown>) => { const t = performance.now(); try { const r = await f(); out[name] = { ok: true, ms: Math.round(performance.now() - t), result: r } } catch (e) { out[name] = { ok: false, ms: Math.round(performance.now() - t), error: errText(e) } } save(acc!); view(acc) }
   const msgs: ChatMessage[] = [{ role: 'system', content: buildSystemPrompt() }, { role: 'user', content: 'Ich möchte heute 4.000 kcal essen.' }]
   type Raw = { chat(m: ChatMessage[], o: RawChatOptions): Promise<{ text: string }>; resetChat(): Promise<void>; unload(): Promise<void> }
-  const main = webllmFactory(undefined, { worker: false }), wk = webllmFactory(undefined, { worker: true })
+  const main = webllmFactory(undefined, { worker: false }), wk = webllmFactory(undefined, { worker: true, fallbackToMain: false })
   status('Lade Modell (Hauptthread) …')
   let eng: Raw
   try { eng = (await main(modelId, p => status(p.text))) as unknown as Raw } catch (e) { out.loadError = errText(e); save(acc); setBusy(false); view(acc); return }
@@ -158,7 +167,7 @@ async function injection() {
     try { await h.run(msgs, { maxTokens: 60 }) } catch (e) { firstErr = errText(e) }
     const second = await h.run(msgs, { maxTokens: 60 }); const info = { firstErr, recoveries: h.recoveries, secondText: second.text, finalState: h.state }; await h.dispose(); return info
   })
-  status('Ursachentest fertig.'); setBusy(false); view(acc)
+  out.trace = [...trace]; out.isolationLast = lastIsolation; save(acc!); status('Ursachentest fertig.'); setBusy(false); view(acc)
 }
 
 $('bench').onclick = () => startBenchmark()

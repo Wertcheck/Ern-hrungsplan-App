@@ -19,9 +19,16 @@ export const MODELS = [
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 let libPromise: Promise<Any> | null = null
+/** Protokoll der Ladephasen (mit Zeitstempel) – wird im Benchmark-Ergebnis mitgeliefert, damit „hängt beim Laden“ diagnostizierbar ist. */
+export const trace: { t: number; msg: string }[] = []
+const t0 = typeof performance !== 'undefined' ? performance.now() : 0
+export const note = (msg: string) => { trace.push({ t: Math.round(performance.now() - t0), msg }); if (trace.length > 200) trace.shift() }
+export let lastIsolation: 'worker' | 'main' | 'main-fallback' | null = null
+const timeout = <T>(p: Promise<T>, ms: number, what: string): Promise<T> => new Promise((res, rej) => { const h = setTimeout(() => rej(new Error(`${what}: keine Antwort nach ${Math.round(ms / 1000)} s`)), ms); p.then(v => { clearTimeout(h); res(v) }, e => { clearTimeout(h); rej(e) }) })
+
 export const loadWebLlm = (url = WEBLLM_URL): Promise<Any> => {
   // Ein fehlgeschlagener Import (z. B. kurz offline) darf nicht dauerhaft zwischengespeichert werden
-  libPromise ??= import(/* @vite-ignore */ url).catch(e => { libPromise = null; throw e })
+  if (!libPromise) { note('Bibliothek wird vom CDN geladen'); libPromise = timeout(import(/* @vite-ignore */ url), 40_000, 'Bibliothek vom CDN laden').then(l => { note('Bibliothek geladen'); return l }).catch(e => { libPromise = null; note(`Bibliothek-Fehler: ${String(e?.message ?? e)}`); throw e }) }
   return libPromise
 }
 
@@ -61,15 +68,41 @@ class WebLlmEngine implements LlmEngine {
 
 const workerSource = (url: string) => `import { WebWorkerMLCEngineHandler } from ${JSON.stringify(url)};\nconst handler = new WebWorkerMLCEngineHandler();\nself.onmessage = (m) => handler.onmessage(m);`
 
-/** `worker:true` führt die Engine in einem eigenen Web Worker aus: Wiederherstellung = Worker beenden + neuen starten (echte Isolation). */
-export const webllmFactory = (url = WEBLLM_URL, o: { worker?: boolean } = {}): EngineFactory => async (modelId, onProgress) => {
+async function createMain(lib: Any, modelId: string, cfg: Any): Promise<LlmEngine> { note('Haupthread-Engine wird erstellt'); const e = await lib.CreateMLCEngine(modelId, cfg); note('Haupthread-Engine bereit'); return new WebLlmEngine(e) }
+async function createInWorker(lib: Any, url: string, modelId: string, cfg: Any): Promise<LlmEngine> {
+  const blobUrl = URL.createObjectURL(new Blob([workerSource(url)], { type: 'text/javascript' }))
+  note('Web Worker wird gestartet (Blob-Modul-Worker)')
+  const worker = new Worker(blobUrl, { type: 'module' })
+  const cleanup: (() => void)[] = []
+  try {
+    const failed = new Promise<never>((_r, rej) => {
+      const onErr = (ev: ErrorEvent) => rej(new Error(`Web Worker konnte nicht starten: ${ev.message || 'Skriptfehler (Import, CSP oder Herkunft)'}`))
+      const onMsgErr = () => rej(new Error('Web Worker: Nachricht nicht lesbar (messageerror)'))
+      worker.addEventListener('error', onErr); worker.addEventListener('messageerror', onMsgErr)
+      cleanup.push(() => { worker.removeEventListener('error', onErr); worker.removeEventListener('messageerror', onMsgErr) })
+    })
+    let seen = false
+    const wrapped = { ...cfg, initProgressCallback: (p: { progress?: number; text?: string }) => { if (!seen) { seen = true; note('Worker meldet ersten Fortschritt') } cfg.initProgressCallback(p) } }
+    const engine = await Promise.race([lib.CreateWebWorkerMLCEngine(worker, modelId, wrapped), failed, new Promise<never>((_r, rej) => setTimeout(() => { if (!seen) rej(new Error('Web Worker meldet nach 45 s keinen Fortschritt (er startet vermutlich nicht: Blob-/Herkunftsproblem dieser Seite)')) }, 45_000))])
+    note('Worker-Engine bereit')
+    return new WebLlmEngine(engine, worker)
+  } catch (e) { worker.terminate(); throw e } finally { cleanup.forEach(f => f()); URL.revokeObjectURL(blobUrl) }
+}
+
+/**
+ * `worker:true` führt die Engine in einem eigenen Web Worker aus (Wiederherstellung = Worker beenden + neu starten).
+ * Startet der Worker nicht (z. B. Seite aus einer lokalen Datei), fällt die Fabrik – sichtbar im Protokoll und in `lastIsolation` – auf den Hauptthread zurück.
+ */
+export const webllmFactory = (url = WEBLLM_URL, o: { worker?: boolean; fallbackToMain?: boolean } = {}): EngineFactory => async (modelId, onProgress) => {
   if (!('gpu' in navigator)) throw new Error('WebGPU ist in diesem Browser nicht verfügbar.')
   const lib = await loadWebLlm(url)
   const cfg = { initProgressCallback: (p: { progress?: number; text?: string }) => onProgress?.({ progress: p.progress ?? 0, text: p.text ?? '' }) }
-  if (!o.worker) return new WebLlmEngine(await lib.CreateMLCEngine(modelId, cfg))
-  const blobUrl = URL.createObjectURL(new Blob([workerSource(url)], { type: 'text/javascript' }))
-  const worker = new Worker(blobUrl, { type: 'module' })
-  try { return new WebLlmEngine(await lib.CreateWebWorkerMLCEngine(worker, modelId, cfg), worker) }
-  catch (e) { worker.terminate(); throw e } finally { URL.revokeObjectURL(blobUrl) }
+  if (!o.worker) { lastIsolation = 'main'; return createMain(lib, modelId, cfg) }
+  try { const e = await createInWorker(lib, url, modelId, cfg); lastIsolation = 'worker'; return e }
+  catch (err) {
+    note(`Worker-Start fehlgeschlagen: ${String((err as Error)?.message ?? err)}`)
+    if (o.fallbackToMain === false) throw err
+    note('Rückfall auf Hauptthread'); lastIsolation = 'main-fallback'; return createMain(lib, modelId, cfg)
+  }
 }
 export const isModelCached = async (modelId: string, url = WEBLLM_URL): Promise<boolean | null> => { try { const lib = await loadWebLlm(url); return await lib.hasModelInCache(modelId) } catch { return null } }
