@@ -109,3 +109,75 @@ export async function runGpuProbe(log: (t: string) => void): Promise<Record<stri
   try { device.destroy() } catch { /* ignorieren */ }
   return out
 }
+
+// ---------------------------------------------------------------- Stufe A: GPU-Basisoperationen, getrennt nach Geräte-Variante
+const withScopes = async <T>(device: Any, f: () => Promise<T>): Promise<{ value?: T; errors: string[]; thrown?: string }> => {
+  for (const s of ['out-of-memory', 'validation', 'internal']) device.pushErrorScope(s)
+  let value: T | undefined, thrown: string | undefined
+  try { value = await f() } catch (e) { thrown = err(e) }
+  const errors: string[] = []; for (let i = 0; i < 3; i++) { const e = await device.popErrorScope(); if (e) errors.push(`${e.constructor?.name}: ${String(e.message).slice(0, 300)}`) }
+  return { value, errors, thrown }
+}
+
+/** Ein einzelner Korrektheits-Durchlauf (A=B=1 ⇒ C=n) auf einem gegebenen Gerät. */
+async function matmulCheck(device: Any, f16: boolean, n: number): Promise<Record<string, unknown>> {
+  const r = await withScopes(device, async () => {
+    const mod = device.createShaderModule({ code: wgsl(f16) })
+    const info = mod.getCompilationInfo ? await mod.getCompilationInfo() : { messages: [] }
+    const cmsgs = (info.messages as Any[]).filter(m => m.type === 'error').map(m => `${m.lineNum}:${m.linePos} ${m.message}`).slice(0, 3)
+    if (cmsgs.length) throw new Error(`Shader-Kompilierung: ${cmsgs.join(' | ')}`)
+    const pipe = await device.createComputePipelineAsync({ layout: 'auto', compute: { module: mod, entryPoint: 'main' } })
+    const bytes = n * n * (f16 ? 2 : 4)
+    const mk = (u: number) => device.createBuffer({ size: bytes, usage: u })
+    const bA = mk(GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST), bB = mk(GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST), bC = mk(GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC)
+    const bU = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+    const ones = f16 ? new Uint16Array(n * n).fill(half(1)) : new Float32Array(n * n).fill(1)
+    device.queue.writeBuffer(bA, 0, ones); device.queue.writeBuffer(bB, 0, ones); device.queue.writeBuffer(bU, 0, new Uint32Array([n, 0, 0, 0]))
+    const bg = device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: bA } }, { binding: 1, resource: { buffer: bB } }, { binding: 2, resource: { buffer: bC } }, { binding: 3, resource: { buffer: bU } }] })
+    const enc = device.createCommandEncoder(); const p = enc.beginComputePass(); p.setPipeline(pipe); p.setBindGroup(0, bg); p.dispatchWorkgroups(n / 16, n / 16); p.end()
+    const st = device.createBuffer({ size: bytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST }); enc.copyBufferToBuffer(bC, 0, st, 0, bytes)
+    device.queue.submit([enc.finish()]); await st.mapAsync(GPUMapMode.READ)
+    const raw = st.getMappedRange().slice(0); st.unmap(); [bA, bB, bC, bU, st].forEach(b => b.destroy())
+    const v = f16 ? new Uint16Array(raw) : new Float32Array(raw)
+    const dec = f16 ? (b: number) => { const e = (b >> 10) & 31, m = b & 1023; return e === 0 ? m * 2 ** -24 : e === 31 ? NaN : (1 + m / 1024) * 2 ** (e - 15) } : (x: number) => x
+    let bad = 0; for (let i = 0; i < v.length; i++) if (dec(v[i] as number) !== n) bad++
+    return { correct: bad === 0, wrongElements: bad, sample: dec(v[0] as number) }
+  })
+  return { ...(r.value ?? {}), ok: !r.thrown && !r.errors.length && (r.value as Any)?.correct === true, thrown: r.thrown ?? null, gpuErrors: r.errors }
+}
+
+export async function runGpuMatrix(log: (t: string) => void): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = { startedAt: new Date().toISOString() }
+  const gpu = (navigator as Any).gpu; if (!gpu) return { ...out, error: 'WebGPU nicht verfügbar' }
+  const adapter = await gpu.requestAdapter(); if (!adapter) return { ...out, error: 'kein Adapter' }
+  const L = adapter.limits, F = (n: string) => adapter.features.has(n)
+  out.adapterFeatures = [...adapter.features].sort(); out.adapterLimits = { maxBufferSize: L.maxBufferSize, maxStorageBufferBindingSize: L.maxStorageBufferBindingSize, maxStorageBuffersPerShaderStage: L.maxStorageBuffersPerShaderStage, maxComputeWorkgroupStorageSize: L.maxComputeWorkgroupStorageSize, maxComputeInvocationsPerWorkgroup: L.maxComputeInvocationsPerWorkgroup }
+  const variants: Record<string, Any> = {
+    plain: {},
+    f16_feature: F('shader-f16') ? { requiredFeatures: ['shader-f16'] } : null,
+    // so legt WebLLM 0.2.88 sein Gerät an (Features: f16 + subgroups, falls vorhanden; erhöhte Limits)
+    webllm_like: { requiredFeatures: [...(F('shader-f16') ? ['shader-f16'] : []), ...(F('subgroups') ? ['subgroups'] : [])], requiredLimits: { maxBufferSize: Math.min(L.maxBufferSize, 4294967296), maxStorageBufferBindingSize: Math.min(L.maxStorageBufferBindingSize, 1 << 30), maxComputeWorkgroupStorageSize: 32 << 10, maxStorageBuffersPerShaderStage: 10, maxComputeInvocationsPerWorkgroup: [1024, 512, 256].find(x => x <= L.maxComputeInvocationsPerWorkgroup) } },
+  }
+  const res: Record<string, unknown> = {}; out.variants = res
+  for (const [name, desc] of Object.entries(variants)) {
+    if (desc === null) { res[name] = { skipped: 'shader-f16 nicht verfügbar' }; continue }
+    const v: Record<string, unknown> = { request: JSON.stringify(desc).slice(0, 300) }; res[name] = v; log(`Variante ${name}: Gerät anfordern …`)
+    let dev: Any
+    // Ein Adapter ist nach requestDevice „verbraucht“ (WebGPU-Spezifikation): für jedes Gerät einen frischen Adapter holen
+    try { dev = await (await gpu.requestAdapter()).requestDevice(desc) } catch (e) { v.requestError = err(e); continue }
+    let lost: string | null = null; dev.lost.then((l: Any) => { lost = `${l.reason}: ${l.message}` })
+    v.f32 = await matmulCheck(dev, false, 256); log(`  ${name} f32: ${(v.f32 as Any).ok}`)
+    v.f32_1024 = await matmulCheck(dev, false, 1024)
+    if (dev.features.has('shader-f16')) { v.f16 = await matmulCheck(dev, true, 256); log(`  ${name} f16: ${(v.f16 as Any).ok}`); v.f16_1024 = await matmulCheck(dev, true, 1024) } else v.f16 = 'Gerät ohne shader-f16'
+    v.deviceLost = lost; try { dev.destroy() } catch { /* ignorieren */ }
+  }
+  // wiederholte Initialisierung: Gerät 6× anfordern, kleine Rechnung + Rücklesen, zerstören
+  log('Wiederholte GPU-Initialisierung ×6 …')
+  const reinit: Record<string, unknown>[] = []; out.repeatedInit = reinit
+  for (let i = 0; i < 6; i++) {
+    const t = performance.now(); const e: Record<string, unknown> = { i: i + 1 }
+    try { const a = await gpu.requestAdapter(); const d = await a.requestDevice({}); const c = await matmulCheck(d, false, 256); e.ok = c.ok; e.thrown = c.thrown; d.destroy() } catch (x) { e.ok = false; e.error = err(x) }
+    e.ms = Math.round(performance.now() - t); reinit.push(e)
+  }
+  out.finishedAt = new Date().toISOString(); return out
+}

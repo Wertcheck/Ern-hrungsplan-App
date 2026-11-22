@@ -13,10 +13,13 @@
 <h2>Ausgabemodus (nach dem Smoke-Test, der immer zuerst läuft)</h2>
 <label><input type="checkbox" id="mprompt" checked> Nur Prompt + strenger Parser (ohne Grammatik)</label>
 <label><input type="checkbox" id="mgrammar" checked> Grammatik mit Schema (response_format json_object + schema-String)</label>
+<label>WebLLM-Version: <select id="wver"><option>0.2.88</option><option>0.2.89</option><option>0.2.82</option><option>0.2.79</option></select> (0.2.79/0.2.82 bringen die Laufzeit selbst mit; ab 0.2.88 hängt sie von einem separaten Entwicklungspaket ab)</label>
 <label><input type="checkbox" id="useworker" checked> In eigenem Web Worker ausführen (empfohlen)</label>
 <p class="n">Jede Konfiguration läuft in einer <b>frischen Seite</b> (die Seite lädt sich selbst neu – das ist gewollt). Der Stand bleibt bei Neuladen oder Absturz erhalten.</p>
 <button id="bench">1. Benchmark starten</button>
 <button id="inject" class="alt">2. Ursachentest (Fehlerinjektion)</button>
+<button id="stages" class="alt">4. Stufentests A+B (GPU-Varianten, Worker-Arten; ohne Modell)</button>
+<button id="accept" class="alt">5. Abnahmetest je Modell (10 Aufrufe, Struktur, Fehler, Neustart)</button>
 <button id="gpu" class="alt">3. GPU-Rohtest (ohne Modell, ca. 1 Min.)</button>
 <button id="abort" class="alt" disabled>Abbrechen</button><button id="reset" class="alt">Ergebnisse löschen</button><br>
 <button id="copy" class="alt">Ergebnis kopieren</button><button id="dl" class="alt">Als Datei speichern</button>

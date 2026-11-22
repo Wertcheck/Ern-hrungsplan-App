@@ -6,8 +6,10 @@
  */
 import type { ChatMessage, ChatOptions, ChatStats, EngineFactory, LlmEngine } from './host'
 
+export const WEBLLM_VERSIONS = ['0.2.88', '0.2.89', '0.2.82', '0.2.79'] as const
 export const WEBLLM_VERSION = '0.2.88'
-export const WEBLLM_URL = `https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@${WEBLLM_VERSION}/+esm`
+export const webllmUrl = (v: string) => `https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@${v}/+esm`
+export const WEBLLM_URL = webllmUrl(WEBLLM_VERSION)
 export const MODELS = [
   { id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC', label: 'Llama 3.2 1B (Q4)', vramMB: 879 },
   { id: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', label: 'Qwen 2.5 1.5B (Q4)', vramMB: 1630 },
@@ -18,7 +20,7 @@ export const MODELS = [
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-let libPromise: Promise<Any> | null = null
+const libs = new Map<string, Promise<Any>>()
 /** Protokoll der Ladephasen (mit Zeitstempel) – wird im Benchmark-Ergebnis mitgeliefert, damit „hängt beim Laden“ diagnostizierbar ist. */
 export const trace: { t: number; msg: string }[] = []
 const t0 = typeof performance !== 'undefined' ? performance.now() : 0
@@ -28,8 +30,9 @@ const timeout = <T>(p: Promise<T>, ms: number, what: string): Promise<T> => new 
 
 export const loadWebLlm = (url = WEBLLM_URL): Promise<Any> => {
   // Ein fehlgeschlagener Import (z. B. kurz offline) darf nicht dauerhaft zwischengespeichert werden
-  if (!libPromise) { note('Bibliothek wird vom CDN geladen'); libPromise = timeout(import(/* @vite-ignore */ url), 40_000, 'Bibliothek vom CDN laden').then(l => { note('Bibliothek geladen'); return l }).catch(e => { libPromise = null; note(`Bibliothek-Fehler: ${String(e?.message ?? e)}`); throw e }) }
-  return libPromise
+  let p = libs.get(url)
+  if (!p) { note(`Bibliothek wird vom CDN geladen: ${url}`); p = timeout(import(/* @vite-ignore */ url), 40_000, 'Bibliothek vom CDN laden').then(l => { note('Bibliothek geladen'); return l }).catch(e => { libs.delete(url); note(`Bibliothek-Fehler: ${String(e?.message ?? e)}`); throw e }); libs.set(url, p) }
+  return p
 }
 
 /** Nur für die Fehlerinjektion im Benchmark: erzwingt ein bestimmtes response_format (z. B. das fehlerhafte schemalose json_object). */
@@ -66,27 +69,45 @@ class WebLlmEngine implements LlmEngine {
   }
 }
 
-const workerSource = (url: string) => `import { WebWorkerMLCEngineHandler } from ${JSON.stringify(url)};\nconst handler = new WebWorkerMLCEngineHandler();\nself.onmessage = (m) => handler.onmessage(m);`
 
 async function createMain(lib: Any, modelId: string, cfg: Any): Promise<LlmEngine> { note('Haupthread-Engine wird erstellt'); const e = await lib.CreateMLCEngine(modelId, cfg); note('Haupthread-Engine bereit'); return new WebLlmEngine(e) }
-async function createInWorker(lib: Any, url: string, modelId: string, cfg: Any): Promise<LlmEngine> {
-  const blobUrl = URL.createObjectURL(new Blob([workerSource(url)], { type: 'text/javascript' }))
-  note('Web Worker wird gestartet (Blob-Modul-Worker)')
-  const worker = new Worker(blobUrl, { type: 'module' })
+/**
+ * Worker-Start in drei Varianten (Reihenfolge). Messung: Modul-Worker aus Blob-URL scheitert auf Seiten mit file://-Herkunft;
+ * klassischer Blob-Worker und Modul-Worker aus data:-URL laufen dort. Jede Variante wird einzeln versucht und im Protokoll vermerkt.
+ */
+const handlerBoot = (url: string) => ({
+  moduleSrc: `import { WebWorkerMLCEngineHandler } from ${JSON.stringify(url)};\nconst handler = new WebWorkerMLCEngineHandler();\nself.onmessage = (m) => handler.onmessage(m);`,
+  // klassisch: Nachrichten bis zum fertigen Import zwischenspeichern
+  classicSrc: `let h = null; const q = [];\nself.onmessage = (m) => { if (h) h.onmessage(m); else q.push(m); };\nimport(${JSON.stringify(url)}).then((mod) => { h = new mod.WebWorkerMLCEngineHandler(); q.splice(0).forEach((m) => h.onmessage(m)); }).catch((e) => postMessage({ workerBootError: String(e && e.message || e) }));`,
+})
+type WorkerKind = 'module-data-url' | 'classic-blob-dynamic-import' | 'module-blob'
+const makeWorker = (kind: WorkerKind, url: string): { worker: Worker; revoke: () => void } => {
+  const b = handlerBoot(url)
+  if (kind === 'module-data-url') return { worker: new Worker(`data:text/javascript;charset=utf-8,${encodeURIComponent(b.moduleSrc)}`, { type: 'module' }), revoke: () => undefined }
+  if (kind === 'classic-blob-dynamic-import') { const u = URL.createObjectURL(new Blob([b.classicSrc], { type: 'text/javascript' })); return { worker: new Worker(u), revoke: () => URL.revokeObjectURL(u) } }
+  const u = URL.createObjectURL(new Blob([b.moduleSrc], { type: 'text/javascript' })); return { worker: new Worker(u, { type: 'module' }), revoke: () => URL.revokeObjectURL(u) }
+}
+// data:-Worker bewusst NICHT in der Reihenfolge: ein Worker mit data:-URL hat keinen Zugriff auf CacheStorage (Messung mit dem echten web-llm-Code: SecurityError ‘caches’), WebLLM speichert Modelle aber dort.
+export const WORKER_KINDS: WorkerKind[] = ['classic-blob-dynamic-import', 'module-blob']
+export let lastWorkerKind: WorkerKind | null = null
+
+async function createInWorker(lib: Any, url: string, modelId: string, cfg: Any, kind: WorkerKind): Promise<LlmEngine> {
+  note(`Web Worker wird gestartet (${kind})`)
+  const { worker, revoke } = makeWorker(kind, url)
   const cleanup: (() => void)[] = []
   try {
     const failed = new Promise<never>((_r, rej) => {
-      const onErr = (ev: ErrorEvent) => rej(new Error(`Web Worker konnte nicht starten: ${ev.message || 'Skriptfehler (Import, CSP oder Herkunft)'}`))
-      const onMsgErr = () => rej(new Error('Web Worker: Nachricht nicht lesbar (messageerror)'))
-      worker.addEventListener('error', onErr); worker.addEventListener('messageerror', onMsgErr)
-      cleanup.push(() => { worker.removeEventListener('error', onErr); worker.removeEventListener('messageerror', onMsgErr) })
+      const onErr = (ev: ErrorEvent) => rej(new Error(`Web Worker (${kind}) konnte nicht starten: ${ev.message || 'Skriptfehler (Import, CSP oder Herkunft)'}`))
+      const onMsg = (ev: MessageEvent) => { if (ev.data && ev.data.workerBootError) rej(new Error(`Web Worker (${kind}): Import im Worker fehlgeschlagen: ${ev.data.workerBootError}`)) }
+      worker.addEventListener('error', onErr); worker.addEventListener('message', onMsg)
+      cleanup.push(() => { worker.removeEventListener('error', onErr); worker.removeEventListener('message', onMsg) })
     })
     let seen = false
     const wrapped = { ...cfg, initProgressCallback: (p: { progress?: number; text?: string }) => { if (!seen) { seen = true; note('Worker meldet ersten Fortschritt') } cfg.initProgressCallback(p) } }
-    const engine = await Promise.race([lib.CreateWebWorkerMLCEngine(worker, modelId, wrapped), failed, new Promise<never>((_r, rej) => setTimeout(() => { if (!seen) rej(new Error('Web Worker meldet nach 45 s keinen Fortschritt (er startet vermutlich nicht: Blob-/Herkunftsproblem dieser Seite)')) }, 45_000))])
-    note('Worker-Engine bereit')
+    const engine = await Promise.race([lib.CreateWebWorkerMLCEngine(worker, modelId, wrapped), failed, new Promise<never>((_r, rej) => setTimeout(() => { if (!seen) rej(new Error(`Web Worker (${kind}) meldet nach 45 s keinen Fortschritt`)) }, 45_000))])
+    note('Worker-Engine bereit'); lastWorkerKind = kind
     return new WebLlmEngine(engine, worker)
-  } catch (e) { worker.terminate(); throw e } finally { cleanup.forEach(f => f()); URL.revokeObjectURL(blobUrl) }
+  } catch (e) { worker.terminate(); throw e } finally { cleanup.forEach(f => f()); revoke() }
 }
 
 /**
@@ -98,11 +119,12 @@ export const webllmFactory = (url = WEBLLM_URL, o: { worker?: boolean; fallbackT
   const lib = await loadWebLlm(url)
   const cfg = { initProgressCallback: (p: { progress?: number; text?: string }) => onProgress?.({ progress: p.progress ?? 0, text: p.text ?? '' }) }
   if (!o.worker) { lastIsolation = 'main'; return createMain(lib, modelId, cfg) }
-  try { const e = await createInWorker(lib, url, modelId, cfg); lastIsolation = 'worker'; return e }
-  catch (err) {
-    note(`Worker-Start fehlgeschlagen: ${String((err as Error)?.message ?? err)}`)
-    if (o.fallbackToMain === false) throw err
-    note('Rückfall auf Hauptthread'); lastIsolation = 'main-fallback'; return createMain(lib, modelId, cfg)
+  let lastErr: unknown = null
+  for (const kind of WORKER_KINDS) {
+    try { const e = await createInWorker(lib, url, modelId, cfg, kind); lastIsolation = 'worker'; return e }
+    catch (err) { lastErr = err; note(`Worker-Variante ${kind} fehlgeschlagen: ${String((err as Error)?.message ?? err)}`) }
   }
+  if (o.fallbackToMain === false) throw lastErr
+  note('Alle Worker-Varianten fehlgeschlagen – Rückfall auf Hauptthread'); lastIsolation = 'main-fallback'; return createMain(lib, modelId, cfg)
 }
 export const isModelCached = async (modelId: string, url = WEBLLM_URL): Promise<boolean | null> => { try { const lib = await loadWebLlm(url); return await lib.hasModelInCache(modelId) } catch { return null } }
